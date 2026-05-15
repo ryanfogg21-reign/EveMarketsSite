@@ -42,26 +42,26 @@ const COL = {
   product:    0,
   category:   1,
   group:      2,
-  tech:       3,
-  meta:       4,
-  buyISK:     5,
-  buyPct:     6,
-  buyIpH:     7,
-  optISK:     8,
-  optPct:     9,
-  optIpH:     10,
-  avgBuyISK:  11,
-  avgBuyPct:  12,
-  avgBuyIpH:  13,
-  avgOptISK:  14,
-  avgOptPct:  15,
-  avgOptIpH:  16,
-  sat:        17,
-  links:      18,
+  demand:     3,
+  buyISK:     4,
+  buyPct:     5,
+  buyIpH:     6,
+  optISK:     7,
+  optPct:     8,
+  optIpH:     9,
+  avgBuyISK:  10,
+  avgBuyPct:  11,
+  avgBuyIpH:  12,
+  avgOptISK:  13,
+  avgOptPct:  14,
+  avgOptIpH:  15,
+  sat:        16,
+  links:      17,
 };
 
 // CSS class applied per column group (left border + text colour)
 const COL_CLASSES = {
+  [COL.demand]:    'th-demand',
   [COL.buyISK]:    'th-buy',    [COL.buyPct]:    'th-buy',    [COL.buyIpH]:    'th-buy',
   [COL.optISK]:    'th-opt',    [COL.optPct]:    'th-opt',    [COL.optIpH]:    'th-opt',
   [COL.avgBuyISK]: 'th-avgbuy', [COL.avgBuyPct]: 'th-avgbuy', [COL.avgBuyIpH]: 'th-avgbuy',
@@ -173,11 +173,6 @@ function buildRows(items, settings) {
   return items.map(item => {
     const p = calcItemProfits(item, settings);
 
-    const techLabel = item.tech === 2  ? 'Tech II'
-                    : item.tech === 14 ? 'Tech III'
-                    : item.tech === 1  ? 'Tech I'
-                    : `Meta ${item.tech || 0}`;
-
     const evRefUrl = `https://everef.net/type/${item.type_id}`;
     const mktUrl   = `https://evemarketer.com/types/${item.type_id}`;
     const iconUrl  = `https://images.evetech.net/types/${item.type_id}/icon`;
@@ -204,12 +199,17 @@ function buildRows(items, settings) {
       ? `<span class="sat-badge ${satCls(item.saturation)}">${fmtSat(item.saturation)}</span>`
       : '<span class="profit-zero">—</span>';
 
+    // Daily ISK volume: avg units traded/day × avg price — measures market liquidity
+    const dailyIskVol = (item.avg_daily_vol || 0) * (item.product.avg_price || 0);
+    const demandHtml  = dailyIskVol > 0
+      ? `<span class="demand-val">${fmtISK(dailyIskVol)}<small>/day</small></span>`
+      : '<span class="profit-zero">—</span>';
+
     return [
-      { display: nameTd,                                              sort: item.name },
-      { display: escHtml(item.category_name || '—'),                 sort: item.category_name || '' },
-      { display: escHtml(item.group || '—'),                         sort: item.group || '' },
-      { display: `<span class="badge-tech">${techLabel}</span>`,     sort: item.tech  || 0 },
-      { display: String(item.meta || 0),                             sort: item.meta  || 0 },
+      { display: nameTd,                                  sort: item.name },
+      { display: escHtml(item.category_name || '—'),      sort: item.category_name || '' },
+      { display: escHtml(item.group || '—'),              sort: item.group || '' },
+      { display: demandHtml,                              sort: dailyIskVol },
       // Buy scenario
       makeNumCell(p.buy.isk),
       makeNumCell(p.buy.pct, fmtPct),

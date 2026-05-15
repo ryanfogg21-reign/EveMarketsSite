@@ -30,6 +30,8 @@
   --col-avgopt-brd: #0a4d33;
   --col-sat-clr:    #f5a07a;
   --col-sat-brd:    #4d1f0a;
+  --col-demand-clr: #a0e8c8;
+  --col-demand-brd: #0a3d28;
 }
 
 *, *::before, *::after { box-sizing: border-box; }
@@ -196,6 +198,7 @@ th.th-opt    { border-left: 2px solid var(--col-opt-border)  !important; color: 
 th.th-avgbuy { border-left: 2px solid var(--col-avgbuy-brd)  !important; color: var(--col-avgbuy-clr) !important; }
 th.th-avgopt { border-left: 2px solid var(--col-avgopt-brd)  !important; color: var(--col-avgopt-clr) !important; }
 th.th-sat    { color: var(--col-sat-clr) !important; }
+th.th-demand { color: var(--col-demand-clr) !important; }
 
 /* ── Data rows ───────────────────────────────────────────────────────────── */
 #manuTable tbody tr {
@@ -219,6 +222,11 @@ td.th-opt    { border-left: 1px solid var(--col-opt-border); }
 td.th-avgbuy { border-left: 1px solid var(--col-avgbuy-brd); }
 td.th-avgopt { border-left: 1px solid var(--col-avgopt-brd); }
 td.th-sat    { border-left: 1px solid var(--col-sat-brd);    }
+td.th-demand { border-left: 1px solid var(--col-demand-brd); }
+
+/* Daily ISK volume value */
+.demand-val { color: var(--col-demand-clr); font-variant-numeric: tabular-nums; }
+.demand-val small { font-size: 0.65rem; color: var(--text-muted); margin-left: 1px; }
 
 /* Numeric alignment */
 td.num { text-align: right; font-variant-numeric: tabular-nums; }
