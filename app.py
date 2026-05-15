@@ -46,10 +46,8 @@ MANUFACTURING_ACTIVITY_ID = 1
 FUZZWORK_SDE = "https://www.fuzzwork.co.uk/dump/latest/"
 FUZZWORK_MKT = "https://market.fuzzwork.co.uk/aggregates/"
 ESI_BASE     = "https://esi.evetech.net/latest/"
-GEMINI_URL   = (
-    "https://generativelanguage.googleapis.com/v1beta/models/"
-    "gemini-2.0-flash-lite:generateContent"
-)
+GROQ_URL     = "https://api.groq.com/openai/v1/chat/completions"
+GROQ_MODEL   = "llama-3.3-70b-versatile"
 
 CACHE_DIR = os.path.join(os.path.dirname(__file__), "cache")
 DB_PATH   = os.path.join(CACHE_DIR, "eve.db")
@@ -708,39 +706,38 @@ Keep each reasoning under 80 words. projected_upside_pct is the expected % price
 """
 
 
-def _call_gemini(prompt: str) -> dict:
-    api_key = os.environ.get("GEMINI_API_KEY", "")
+def _call_groq(prompt: str) -> dict:
+    api_key = os.environ.get("GROQ_API_KEY", "")
     if not api_key:
-        raise RuntimeError("GEMINI_API_KEY environment variable is not set.")
+        raise RuntimeError("GROQ_API_KEY environment variable is not set.")
 
     payload = {
-        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
-        "generationConfig": {
-            "responseMimeType": "application/json",
-            "temperature":      0.2,
-            "maxOutputTokens":  8192,
-        },
+        "model":           GROQ_MODEL,
+        "messages":        [{"role": "user", "content": prompt}],
+        "temperature":     0.2,
+        "max_tokens":      8192,
+        "response_format": {"type": "json_object"},
     }
 
     # Retry up to 3 times on rate-limit (429) with increasing back-off
     for attempt in range(3):
         r = requests.post(
-            GEMINI_URL,
-            params={"key": api_key},
+            GROQ_URL,
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
             json=payload,
             timeout=180,
         )
         if r.status_code == 429 and attempt < 2:
             wait = 30 * (attempt + 1)
-            log.warning("Gemini rate limit (attempt %d/3) — waiting %ds", attempt + 1, wait)
-            _analysis_status["message"] = f"Rate limited by Gemini — retrying in {wait}s…"
+            log.warning("Groq rate limit (attempt %d/3) — waiting %ds", attempt + 1, wait)
+            _analysis_status["message"] = f"Rate limited by Groq — retrying in {wait}s…"
             time.sleep(wait)
             continue
         r.raise_for_status()
         break
 
     data = r.json()
-    raw  = data["candidates"][0]["content"]["parts"][0]["text"]
+    raw  = data["choices"][0]["message"]["content"]
     raw  = raw.strip().lstrip("```json").lstrip("```").rstrip("```").strip()
     return json.loads(raw)
 
@@ -793,7 +790,7 @@ def _run_analysis():
         log.info("AI analysis: sending %d items to Gemini", len(items))
 
         prompt = _build_analysis_prompt(items)
-        result = _call_gemini(prompt)
+        result = _call_groq(prompt)
 
         items_by_id = {item["type_id"]: item for item in items}
         result = _enrich_ratings(result, items_by_id)
