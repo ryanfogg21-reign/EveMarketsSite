@@ -674,7 +674,7 @@ RATING CRITERIA (apply ALL signals together):
 
 Return ONLY valid JSON — no markdown, no code fences — with this exact structure:
 {{
-  "market_summary": "3-4 sentence overall T2 market assessment covering the broadest trends visible in the data",
+  "market_summary": "3-4 sentence overall T2 market assessment",
   "key_insights": [
     "Actionable insight 1 (cite specific items or categories)",
     "Actionable insight 2",
@@ -688,21 +688,21 @@ Return ONLY valid JSON — no markdown, no code fences — with this exact struc
       "name": "Item Name",
       "projected_upside_pct": 15,
       "confidence": "high",
-      "reasoning": "1-2 sentences citing specific numbers from the data"
+      "reasoning": "1-2 sentences citing specific numbers"
     }}
   ],
   "good_buy": [ same structure as strong_buy ],
   "hold": [
-    {{ "type_id": 12345, "name": "Item Name", "reasoning": "Brief reason" }}
+    {{ "type_id": 12345, "name": "Item Name" }}
   ],
   "avoid": [
     {{ "type_id": 12345, "name": "Item Name", "reasoning": "Brief reason" }}
   ]
 }}
 
-Rate ALL items — every item must appear in exactly one of: strong_buy, good_buy, hold, avoid.
-Aim for: 5-15 strong_buy, 15-30 good_buy, the rest in hold, 5-15 avoid.
-Keep each reasoning under 80 words. projected_upside_pct is the expected % price recovery (strong_buy/good_buy only).
+Rate ALL items — every item must appear in exactly one section.
+Aim for: 5-10 strong_buy, 10-20 good_buy, the rest in hold, 5-10 avoid.
+Keep reasoning under 60 words. projected_upside_pct is the expected % price recovery.
 """
 
 
@@ -715,7 +715,7 @@ def _call_groq(prompt: str) -> dict:
         "model":           GROQ_MODEL,
         "messages":        [{"role": "user", "content": prompt}],
         "temperature":     0.2,
-        "max_tokens":      8192,
+        "max_tokens":      4096,
         "response_format": {"type": "json_object"},
     }
 
@@ -779,9 +779,9 @@ def _run_analysis():
             _analysis_status["message"] = "No price data available yet — run the manufacturing init first."
             return
 
-        # Cap at top 200 by daily ISK volume to stay within free-tier token limits.
+        # Cap at top 100 by daily ISK volume to stay within Groq's per-request size limit.
         # Items are already sorted by daily_isk_vol DESC so we keep the most liquid ones.
-        MAX_ITEMS = 200
+        MAX_ITEMS = 100
         if len(items) > MAX_ITEMS:
             log.info("Capping analysis dataset from %d to %d items", len(items), MAX_ITEMS)
             items = items[:MAX_ITEMS]
