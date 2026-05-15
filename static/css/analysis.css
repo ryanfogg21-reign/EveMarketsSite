@@ -265,6 +265,32 @@
   flex: 1;
 }
 
+/* ── Parent component usage row ──────────────────────────────────────────────  */
+.ic-parents {
+  padding: 0.3rem 0.75rem 0.25rem;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  align-items: center;
+}
+.ic-parents-label {
+  color: var(--text-dim, #6b7280);
+  font-weight: 600;
+  margin-right: 0.15rem;
+  white-space: nowrap;
+}
+.ic-parent-chip {
+  background: #1a2035;
+  border: 1px solid #2a3555;
+  border-radius: 3px;
+  padding: 0.05rem 0.4rem;
+  font-size: 0.68rem;
+  color: var(--accent, #5b8cff);
+  white-space: nowrap;
+}
+
 /* ── Hold / avoid compact card ───────────────────────────────────────────────  */
 .item-card.compact .ic-header { padding: 0.45rem 0.65rem; }
 .item-card.compact .ic-icon   { width: 22px; height: 22px; }

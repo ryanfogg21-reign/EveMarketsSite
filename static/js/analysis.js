@@ -112,6 +112,13 @@ function renderItemCard(item, rating) {
       </div>`;
   }
 
+  // Parent component usage row (strong_buy / good_buy only)
+  let parentRow = '';
+  if (!isCompact && item.parents && item.parents.length > 0) {
+    const chips = item.parents.map(p => `<span class="ic-parent-chip">${escHtml(p)}</span>`).join('');
+    parentRow = `<div class="ic-parents"><span class="ic-parents-label">Used in:</span> ${chips}</div>`;
+  }
+
   // Upside row (strong_buy / good_buy only)
   let upside = '';
   if ((rating === 'strong_buy' || rating === 'good_buy') && item.projected_upside_pct) {
@@ -137,7 +144,7 @@ function renderItemCard(item, rating) {
 
   const card = document.createElement('div');
   card.className = `item-card ${ratingCls}${isCompact ? ' compact' : ''}`;
-  card.innerHTML = header + stats + upside + reasoning;
+  card.innerHTML = header + stats + parentRow + upside + reasoning;
   return card;
 }
 

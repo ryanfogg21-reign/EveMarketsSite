@@ -595,7 +595,7 @@ def _collect_material_type_ids(product_type_ids: list) -> list:
 
 # ── AI Analysis ────────────────────────────────────────────────────────────────
 def _build_analysis_items() -> list:
-    """Pull all T2 items with price data into a compact list for the AI prompt."""
+    """Pull non-Ship, non-Rig T2 items with price data into a compact list for the AI prompt."""
     with db() as conn:
         # How many T2 blueprints use each type as a material (structural demand signal)
         dep_rows = conn.execute("""
@@ -608,6 +608,19 @@ def _build_analysis_items() -> list:
         """).fetchall()
         dep_counts = {r["mat_id"]: r["dep_count"] for r in dep_rows}
 
+        # Which T2 parent products consume each type as a material (for demand context)
+        parent_rows = conn.execute("""
+            SELECT bm.mat_id, ti_outer.name AS parent_name
+            FROM bp_materials bm
+            JOIN bp_products bp_outer ON bm.bp_id = bp_outer.bp_id
+            JOIN type_info ti_outer   ON bp_outer.product_id = ti_outer.type_id
+            WHERE ti_outer.meta_group = 2
+            ORDER BY bm.mat_id, ti_outer.name
+        """).fetchall()
+        parent_map: dict[int, list[str]] = {}
+        for r in parent_rows:
+            parent_map.setdefault(r["mat_id"], []).append(r["parent_name"])
+
         rows = conn.execute("""
             SELECT
                 ti.type_id, ti.name, ti.category_name, ti.group_name,
@@ -617,6 +630,8 @@ def _build_analysis_items() -> list:
             JOIN market_prices mp ON ti.type_id = mp.type_id
             LEFT JOIN market_history mh ON ti.type_id = mh.type_id
             WHERE ti.meta_group = 2
+              AND ti.category_name != 'Ship'
+              AND ti.group_name NOT LIKE '%Rig%'
               AND (mp.sell_pct > 0 OR mp.buy_max > 0)
             GROUP BY ti.type_id
             ORDER BY (COALESCE(mh.avg_daily_vol, 0) * mp.avg_price) DESC
@@ -627,6 +642,8 @@ def _build_analysis_items() -> list:
             FROM market_history mh
             JOIN type_info ti ON mh.type_id = ti.type_id
             WHERE ti.meta_group = 2
+              AND ti.category_name != 'Ship'
+              AND ti.group_name NOT LIKE '%Rig%'
         """).fetchall()
         hist_map = {r["type_id"]: r["avg_daily_vol"] for r in hist_rows}
 
@@ -641,6 +658,7 @@ def _build_analysis_items() -> list:
         price_mom_pct   = ((sell_pct - avg_price) / avg_price * 100) if avg_price > 0 else 0
         saturation_pct  = (sell_volume / avg_daily_vol * 100) if avg_daily_vol > 0 else None
         dep_count       = dep_counts.get(r["type_id"], 0)
+        parents         = parent_map.get(r["type_id"], [])[:5]
 
         items.append({
             "type_id":        r["type_id"],
@@ -654,6 +672,7 @@ def _build_analysis_items() -> list:
             "daily_isk_vol":  daily_isk_vol,
             "saturation_pct": round(saturation_pct, 1) if saturation_pct is not None else None,
             "dep_count":      dep_count,
+            "parents":        parents,
         })
 
     return items
@@ -673,19 +692,20 @@ def _fmt_compact(v: float, unit: str = "") -> str:
 
 
 def _build_analysis_prompt(items: list) -> str:
-    header = "type_id|name|category|group|sell|avg_7d|Δ_vs_7d|isk_vol_day|sat%|used_in_T2_BPs"
+    header = "type_id|name|category|group|sell|avg_7d|Δ_vs_7d|isk_vol_day|sat%|used_in_T2_BPs|parent_T2_items"
     rows = []
     for item in items:
         sat = f"{item['saturation_pct']:.0f}" if item["saturation_pct"] is not None else "?"
+        parents_str = "; ".join(item.get("parents", [])) or "none"
         rows.append(
             f"{item['type_id']}|{item['name']}|{item['category']}|{item['group']}|"
             f"{_fmt_compact(item['sell_price'])}|{_fmt_compact(item['avg_price'])}|"
             f"{item['price_mom_pct']:+.1f}%|{_fmt_compact(item['daily_isk_vol'])}|"
-            f"{sat}%|{item['dep_count']}"
+            f"{sat}%|{item['dep_count']}|{parents_str}"
         )
     data_block = "\n".join(rows)
 
-    return f"""You are an expert Eve Online market analyst specialising in Tech II manufacturing.
+    return f"""You are an expert Eve Online market analyst specialising in Tech II manufacturing components (modules, ammo, drones, implants — NOT ships or rigs, which are excluded from this dataset).
 
 Analyse ALL of the following T2 manufacturable items and produce buy/sell ratings for each.
 
@@ -696,6 +716,7 @@ COLUMN GUIDE:
 - isk_vol_day     = avg_daily_vol × avg_price (market liquidity — how much ISK trades per day)
 - sat%            = sell_volume / avg_daily_vol × 100. Low (<50%) = undersupplied. High (>200%) = oversupplied.
 - used_in_T2_BPs  = count of other T2 blueprints that require this item as a material (structural demand).
+- parent_T2_items = names of T2 products that consume this item as a manufacturing material. When those parent items see increased production demand, this item's demand rises proportionally.
 
 RATING CRITERIA (apply ALL signals together):
 - STRONG BUY:  sat% < 50 AND Δ_vs_7d < -5% AND isk_vol_day high → undersupplied + price dip + real demand
@@ -708,7 +729,7 @@ RATING CRITERIA (apply ALL signals together):
 
 Return ONLY valid JSON — no markdown, no code fences — with this exact structure:
 {{
-  "market_summary": "3-4 sentence overall T2 market assessment",
+  "market_summary": "3-4 sentence overall T2 component market assessment, noting any broad trends across categories",
   "key_insights": [
     "Actionable insight 1 (cite specific items or categories)",
     "Actionable insight 2",
@@ -722,7 +743,7 @@ Return ONLY valid JSON — no markdown, no code fences — with this exact struc
       "name": "Item Name",
       "projected_upside_pct": 15,
       "confidence": "high",
-      "reasoning": "1-2 sentences citing specific numbers"
+      "reasoning": "2-3 sentences. Cite the specific sat%, Δ_vs_7d, and isk_vol_day numbers. If this item has parent_T2_items, explain how demand from those parent products supports a price recovery or makes this a structural buy — e.g. 'Used as a component in X and Y, so any increase in their production drives demand here directly.'"
     }}
   ],
   "good_buy": [ same structure as strong_buy ],
@@ -730,13 +751,14 @@ Return ONLY valid JSON — no markdown, no code fences — with this exact struc
     {{ "type_id": 12345, "name": "Item Name" }}
   ],
   "avoid": [
-    {{ "type_id": 12345, "name": "Item Name", "reasoning": "Brief reason" }}
+    {{ "type_id": 12345, "name": "Item Name", "reasoning": "Brief reason citing key negative signal" }}
   ]
 }}
 
 Rate ALL items — every item must appear in exactly one section.
 Aim for: 5-10 strong_buy, 10-20 good_buy, the rest in hold, 5-10 avoid.
-Keep reasoning under 60 words. projected_upside_pct is the expected % price recovery.
+projected_upside_pct is the expected % price recovery toward avg_7d (or beyond if structurally undersupplied).
+For items with used_in_T2_BPs >= 2, always mention the parent products by name in reasoning and explain the demand linkage.
 """
 
 
@@ -749,7 +771,7 @@ def _call_groq(prompt: str) -> dict:
         "model":           GROQ_MODEL,
         "messages":        [{"role": "user", "content": prompt}],
         "temperature":     0.2,
-        "max_tokens":      4096,
+        "max_tokens":      8192,
         "response_format": {"type": "json_object"},
     }
 
@@ -794,6 +816,7 @@ def _enrich_ratings(result: dict, items_by_id: dict) -> dict:
                     "daily_isk_vol":  d["daily_isk_vol"],
                     "saturation_pct": d["saturation_pct"],
                     "dep_count":      d["dep_count"],
+                    "parents":        d.get("parents", []),
                 })
             enriched.append(item)
         result[section] = enriched
