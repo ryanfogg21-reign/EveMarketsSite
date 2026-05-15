@@ -713,24 +713,34 @@ def _call_gemini(prompt: str) -> dict:
     if not api_key:
         raise RuntimeError("GEMINI_API_KEY environment variable is not set.")
 
-    r = requests.post(
-        GEMINI_URL,
-        params={"key": api_key},
-        json={
-            "contents": [{"role": "user", "parts": [{"text": prompt}]}],
-            "generationConfig": {
-                "responseMimeType": "application/json",
-                "temperature":      0.2,
-                "maxOutputTokens":  8192,
-            },
+    payload = {
+        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+        "generationConfig": {
+            "responseMimeType": "application/json",
+            "temperature":      0.2,
+            "maxOutputTokens":  8192,
         },
-        timeout=180,
-    )
-    r.raise_for_status()
+    }
+
+    # Retry up to 3 times on rate-limit (429) with increasing back-off
+    for attempt in range(3):
+        r = requests.post(
+            GEMINI_URL,
+            params={"key": api_key},
+            json=payload,
+            timeout=180,
+        )
+        if r.status_code == 429 and attempt < 2:
+            wait = 30 * (attempt + 1)
+            log.warning("Gemini rate limit (attempt %d/3) — waiting %ds", attempt + 1, wait)
+            _analysis_status["message"] = f"Rate limited by Gemini — retrying in {wait}s…"
+            time.sleep(wait)
+            continue
+        r.raise_for_status()
+        break
 
     data = r.json()
     raw  = data["candidates"][0]["content"]["parts"][0]["text"]
-    # Strip any accidental markdown fences
     raw  = raw.strip().lstrip("```json").lstrip("```").rstrip("```").strip()
     return json.loads(raw)
 
@@ -771,6 +781,13 @@ def _run_analysis():
             _analysis_status["status"]  = "error"
             _analysis_status["message"] = "No price data available yet — run the manufacturing init first."
             return
+
+        # Cap at top 200 by daily ISK volume to stay within free-tier token limits.
+        # Items are already sorted by daily_isk_vol DESC so we keep the most liquid ones.
+        MAX_ITEMS = 200
+        if len(items) > MAX_ITEMS:
+            log.info("Capping analysis dataset from %d to %d items", len(items), MAX_ITEMS)
+            items = items[:MAX_ITEMS]
 
         _analysis_status["message"] = f"Sending {len(items)} items to Gemini for analysis…"
         log.info("AI analysis: sending %d items to Gemini", len(items))
