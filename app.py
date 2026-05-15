@@ -137,13 +137,17 @@ def init_db():
 
 
 # ── SDE helpers ────────────────────────────────────────────────────────────────
-def _fetch_sde_csv(table: str) -> list:
+def _fetch_sde_csv(table: str):
+    """
+    Download and decompress a Fuzzwork SDE CSV, yielding one dict per row.
+    Streams in chunks to avoid loading the entire file into RAM at once.
+    """
     url = f"{FUZZWORK_SDE}{table}.csv.bz2"
     log.info("Fetching SDE: %s", url)
-    r = requests.get(url, timeout=90)
+    r = requests.get(url, timeout=120)
     r.raise_for_status()
     raw = bz2.decompress(r.content).decode("utf-8")
-    return list(csv.DictReader(io.StringIO(raw)))
+    yield from csv.DictReader(io.StringIO(raw))
 
 
 def load_sde_blueprints():
@@ -155,10 +159,11 @@ def load_sde_blueprints():
 
     _set_status("loading", "Downloading SDE blueprint tables (one-time, ~30 s)…")
 
-    products = _fetch_sde_csv("industryActivityProducts")
+    # Stream each CSV directly into SQLite row-by-row — never holds the full
+    # file in RAM, which keeps us well within Render's 512 MB free-tier limit.
     with db() as conn:
         conn.execute("DELETE FROM bp_products")
-        for r in products:
+        for r in _fetch_sde_csv("industryActivityProducts"):
             if r.get("activityID") == str(MANUFACTURING_ACTIVITY_ID):
                 try:
                     conn.execute(
@@ -168,10 +173,9 @@ def load_sde_blueprints():
                 except (ValueError, KeyError):
                     pass
 
-    materials = _fetch_sde_csv("industryActivityMaterials")
     with db() as conn:
         conn.execute("DELETE FROM bp_materials")
-        for r in materials:
+        for r in _fetch_sde_csv("industryActivityMaterials"):
             if r.get("activityID") == str(MANUFACTURING_ACTIVITY_ID):
                 try:
                     conn.execute(
@@ -181,10 +185,9 @@ def load_sde_blueprints():
                 except (ValueError, KeyError):
                     pass
 
-    activities = _fetch_sde_csv("industryActivity")
     with db() as conn:
         conn.execute("DELETE FROM bp_duration")
-        for r in activities:
+        for r in _fetch_sde_csv("industryActivity"):
             if r.get("activityID") == str(MANUFACTURING_ACTIVITY_ID):
                 secs = r.get("time") or r.get("duration") or "0"
                 try:
@@ -622,23 +625,36 @@ def _background_init():
         _set_status("error", str(exc))
 
 
-_init_thread = threading.Thread(target=_background_init, daemon=True)
-_init_thread.start()
+_init_started = False
+_init_lock    = threading.Lock()
+
+def ensure_init():
+    """Start background init exactly once, regardless of which request arrives first."""
+    global _init_started
+    if _init_started:
+        return
+    with _init_lock:
+        if not _init_started:
+            _init_started = True
+            threading.Thread(target=_background_init, daemon=True).start()
 
 
 # ── Flask routes ───────────────────────────────────────────────────────────────
 @app.route("/")
 def index():
+    ensure_init()
     return render_template("index.html")
 
 
 @app.route("/api/status")
 def api_status():
+    ensure_init()
     return jsonify(_init_status)
 
 
 @app.route("/api/components")
 def api_components():
+    ensure_init()
     if _init_status["status"] != "ready":
         return jsonify({"error": "Not ready", "status": _init_status}), 503
     return jsonify(build_component_data(_type_ids))
@@ -646,6 +662,7 @@ def api_components():
 
 @app.route("/api/refresh", methods=["POST"])
 def api_refresh():
+    ensure_init()
     if not _type_ids:
         return jsonify({"error": "Not initialised yet"}), 503
 
