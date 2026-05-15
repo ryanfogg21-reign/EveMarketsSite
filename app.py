@@ -520,7 +520,7 @@ def build_component_data(type_ids: list) -> list:
                 f"SELECT * FROM market_prices WHERE type_id IN ({','.join('?'*len(mat_ids))})",
                 mat_ids,
             ).fetchall()
-            mp_map = {r["type_id"]: r for r in mp_rows}
+            mp_map = {r["type_id"]: dict(r) for r in mp_rows}  # dict() so .get() works
 
             mat_name_rows = conn.execute(
                 f"SELECT type_id, name FROM type_info WHERE type_id IN ({','.join('?'*len(mat_ids))})",
