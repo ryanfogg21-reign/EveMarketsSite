@@ -1,0 +1,25 @@
+# Claude Code workspace settings
+.claude/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+
+# App cache (SQLite DB and downloaded SDE data – don't commit these)
+cache/
+*.db
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Environment variables
+.env

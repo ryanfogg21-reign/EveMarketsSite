@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>EveIndustry&amp;Markets – Manufacturing Profitability</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet" />
+  <link href="https://cdn.datatables.net/1.13.7/css/dataTables.bootstrap5.min.css" rel="stylesheet" />
+  <link href="/static/css/style.css" rel="stylesheet" />
+</head>
+<body>
+
+<!-- ══════════════════════════════ NAV ═══════════════════════════════════════ -->
+<nav class="navbar navbar-dark navbar-expand-lg site-nav">
+  <div class="container-fluid px-3">
+    <a class="navbar-brand site-brand" href="/">
+      <span class="brand-eve">Eve</span><span class="brand-industry">Industry</span><span class="brand-amp">&amp;</span><span class="brand-markets">Markets</span>
+    </a>
+    <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navMenu">
+      <span class="navbar-toggler-icon"></span>
+    </button>
+    <div class="collapse navbar-collapse" id="navMenu">
+      <ul class="navbar-nav me-auto">
+        <li class="nav-item"><a class="nav-link active" href="/">Manufacturing</a></li>
+      </ul>
+      <div class="d-flex align-items-center gap-3">
+        <span id="esiStatus" class="esi-badge">ESI connecting…</span>
+        <button id="btnRefresh" class="btn btn-sm btn-outline-warning" onclick="triggerRefresh()">
+          ↻ Refresh Prices
+        </button>
+      </div>
+    </div>
+  </div>
+</nav>
+
+<!-- ══════════════════════════════ FILTER + SETTINGS ════════════════════════ -->
+<div class="container-fluid px-3 mt-2">
+  <div class="filter-panel p-3">
+
+    <!-- Row 1: Column toggles + profit filters -->
+    <div class="row g-3 align-items-end mb-3">
+      <div class="col-12 col-lg-auto">
+        <label class="filter-label mb-1 d-block">Hide columns</label>
+        <div class="d-flex flex-wrap gap-2">
+          <div class="form-check form-check-inline mb-0">
+            <input class="form-check-input" type="checkbox" id="chkHideTech" onchange="toggleColumnGroup('tech')">
+            <label class="form-check-label" for="chkHideTech">Tech &amp; Meta</label>
+          </div>
+          <div class="form-check form-check-inline mb-0">
+            <input class="form-check-input" type="checkbox" id="chkHideBuy" onchange="toggleColumnGroup('buy')">
+            <label class="form-check-label" for="chkHideBuy">Calc (Buy)</label>
+          </div>
+          <div class="form-check form-check-inline mb-0">
+            <input class="form-check-input" type="checkbox" id="chkHideOpt" onchange="toggleColumnGroup('opt')">
+            <label class="form-check-label" for="chkHideOpt">Calc (Optimal)</label>
+          </div>
+          <div class="form-check form-check-inline mb-0">
+            <input class="form-check-input" type="checkbox" id="chkHideAvgBuy" onchange="toggleColumnGroup('avgbuy')">
+            <label class="form-check-label" for="chkHideAvgBuy">7d Avg (Buy)</label>
+          </div>
+          <div class="form-check form-check-inline mb-0">
+            <input class="form-check-input" type="checkbox" id="chkHideAvgOpt" onchange="toggleColumnGroup('avgopt')">
+            <label class="form-check-label" for="chkHideAvgOpt">7d Avg (Opt)</label>
+          </div>
+          <div class="form-check form-check-inline mb-0">
+            <input class="form-check-input" type="checkbox" id="chkHideSat" onchange="toggleColumnGroup('sat')">
+            <label class="form-check-label" for="chkHideSat">Saturation</label>
+          </div>
+        </div>
+      </div>
+
+      <div class="col-12 col-lg-auto ms-lg-auto">
+        <div class="row g-2 align-items-end">
+          <div class="col-auto">
+            <label class="filter-label" for="fltMinISK">Min Profit (ISK)</label>
+            <input type="number" id="fltMinISK" class="form-control form-control-sm filter-input" style="width:130px"
+                   placeholder="e.g. 1000000" oninput="applyFilters()">
+          </div>
+          <div class="col-auto">
+            <label class="filter-label" for="fltMinPct">Min Profit (%)</label>
+            <input type="number" id="fltMinPct" class="form-control form-control-sm filter-input" style="width:100px"
+                   placeholder="e.g. 5" oninput="applyFilters()">
+          </div>
+          <div class="col-auto">
+            <label class="filter-label" for="fltMinIpH">Min ISK/Hour</label>
+            <input type="number" id="fltMinIpH" class="form-control form-control-sm filter-input" style="width:130px"
+                   placeholder="e.g. 500000" oninput="applyFilters()">
+          </div>
+          <div class="col-auto">
+            <label class="filter-label" for="fltMaxSat">Max Saturation (%)</label>
+            <input type="number" id="fltMaxSat" class="form-control form-control-sm filter-input" style="width:100px"
+                   placeholder="e.g. 100" oninput="applyFilters()">
+          </div>
+          <div class="col-auto">
+            <label class="filter-label" for="fltMode">Filter using</label>
+            <select id="fltMode" class="form-select form-select-sm filter-input" style="width:130px" onchange="applyFilters()">
+              <option value="buy">Buy (instant)</option>
+              <option value="opt">Optimal</option>
+              <option value="avg_buy">7d Avg (Buy)</option>
+              <option value="avg_opt">7d Avg (Opt)</option>
+            </select>
+          </div>
+          <div class="col-auto">
+            <button class="btn btn-sm btn-secondary" onclick="clearFilters()">Clear</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Divider -->
+    <hr class="panel-divider my-2">
+
+    <!-- Row 2: Manufacturing settings -->
+    <div class="row g-3 align-items-end">
+      <div class="col-auto">
+        <span class="filter-label d-block mb-1" style="color:#f5c842;font-weight:600">⚙ Manufacturing Settings</span>
+      </div>
+
+      <div class="col-auto">
+        <label class="filter-label" for="setME">
+          Blueprint ME %
+          <span class="tip" title="Material Efficiency of the blueprint. Each 1% reduces material requirements by 1% (rounded up, min 1 unit). BPCs from invention typically have 2% ME.">?</span>
+        </label>
+        <div class="input-group input-group-sm">
+          <input type="number" id="setME" class="form-control filter-input" style="width:70px"
+                 value="0" min="0" max="10" step="1" oninput="onSettingChange()">
+          <span class="input-group-text filter-addon">%</span>
+        </div>
+      </div>
+
+      <div class="col-auto">
+        <label class="filter-label" for="setSCI">
+          System Cost Index %
+          <span class="tip" title="Manufacturing tax = sum(material adjusted prices × qty) × SCI. Check your manufacturing system's industry window in-game. Typical values: Jita 4-4 ≈10-15%, busy null-sec ≈3-8%, quiet null-sec Azbel ≈1-3%.">?</span>
+        </label>
+        <div class="input-group input-group-sm">
+          <input type="number" id="setSCI" class="form-control filter-input" style="width:70px"
+                 value="5" min="0" max="25" step="0.1" oninput="onSettingChange()">
+          <span class="input-group-text filter-addon">%</span>
+        </div>
+      </div>
+
+      <div class="col-auto">
+        <label class="filter-label" for="setSTax">
+          Sales Tax %
+          <span class="tip" title="Paid by the seller on each transaction. Base rate = 8%. Reduced by Accounting skill (level 5 = 3.6%). Applied to all sell transactions.">?</span>
+        </label>
+        <div class="input-group input-group-sm">
+          <input type="number" id="setSTax" class="form-control filter-input" style="width:70px"
+                 value="8" min="0" max="8" step="0.1" oninput="onSettingChange()">
+          <span class="input-group-text filter-addon">%</span>
+        </div>
+      </div>
+
+      <div class="col-auto">
+        <label class="filter-label" for="setBFee">
+          Broker Fee %
+          <span class="tip" title="Paid when posting buy or sell orders. Base rate = 3%. Reduced by Broker Relations skill and station standing (minimum ≈1% with max skill + standing). Applied to Opt scenario: sell order posting + buy order posting for materials.">?</span>
+        </label>
+        <div class="input-group input-group-sm">
+          <input type="number" id="setBFee" class="form-control filter-input" style="width:70px"
+                 value="3" min="0" max="3" step="0.1" oninput="onSettingChange()">
+          <span class="input-group-text filter-addon">%</span>
+        </div>
+      </div>
+
+      <div class="col-auto ms-2">
+        <label class="filter-label d-block">&nbsp;</label>
+        <small class="text-muted d-block" style="font-size:0.7rem;max-width:280px;line-height:1.3">
+          Table recalculates instantly. Changes do not require a server round-trip.
+        </small>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ══════════════════════════════ TABLE ═════════════════════════════════════ -->
+<div class="container-fluid px-3 mt-2">
+
+  <!-- Loading state -->
+  <div id="loadingState" class="text-center py-5">
+    <div class="spinner-border text-warning mb-3" role="status"></div>
+    <p id="loadingMsg" class="text-muted">
+      Initialising… First run downloads SDE blueprint data (~30 s). Subsequent runs use the cache.
+    </p>
+  </div>
+
+  <!-- Table -->
+  <div id="tableSection" class="d-none">
+    <div class="d-flex align-items-center justify-content-between mb-1">
+      <h6 class="mb-0 table-title">
+        Manufacturing profit &mdash;
+        <small>Advanced Components (Tech II) &middot; Jita (The Forge)</small>
+      </h6>
+      <small id="lastUpdated" class="text-muted"></small>
+    </div>
+
+    <div class="table-responsive">
+      <table id="manuTable" class="table table-sm table-hover align-middle" style="width:100%">
+        <thead>
+          <tr>
+            <th rowspan="2" class="col-product align-middle">Product</th>
+            <th rowspan="2" class="col-group align-middle">Group</th>
+            <th rowspan="2" class="th-tech align-middle text-center">Tech</th>
+            <th rowspan="2" class="th-meta align-middle text-center">Meta</th>
+            <!-- Current price – Buy -->
+            <th colspan="3" class="col-group-header text-center col-buy-hdr">Profit at current price (Buy)</th>
+            <!-- Current price – Opt -->
+            <th colspan="3" class="col-group-header text-center col-opt-hdr">Profit at current price (Opt.)</th>
+            <!-- 7d avg – Buy -->
+            <th colspan="3" class="col-group-header text-center col-avgbuy-hdr">7d Avg Price (Buy)</th>
+            <!-- 7d avg – Opt -->
+            <th colspan="3" class="col-group-header text-center col-avgopt-hdr">7d Avg Price (Opt.)</th>
+            <!-- Saturation -->
+            <th rowspan="2" class="th-sat align-middle text-center">
+              Sat. %
+              <span class="tip" title="Current sell-order volume ÷ 7-day average daily traded volume × 100. Values >100% mean more supply than a day's demand is listed.">?</span>
+            </th>
+            <!-- Links -->
+            <th rowspan="2" class="th-links align-middle">Links</th>
+          </tr>
+          <tr class="subheader-row">
+            <!-- buy -->
+            <th class="th-buy text-end">ISK</th>
+            <th class="th-buy text-end">%</th>
+            <th class="th-buy text-end">IpH</th>
+            <!-- opt -->
+            <th class="th-opt text-end">ISK</th>
+            <th class="th-opt text-end">%</th>
+            <th class="th-opt text-end">IpH</th>
+            <!-- avg-buy -->
+            <th class="th-avgbuy text-end">ISK</th>
+            <th class="th-avgbuy text-end">%</th>
+            <th class="th-avgbuy text-end">IpH</th>
+            <!-- avg-opt -->
+            <th class="th-avgopt text-end">ISK</th>
+            <th class="th-avgopt text-end">%</th>
+            <th class="th-avgopt text-end">IpH</th>
+          </tr>
+        </thead>
+        <tbody id="tableBody"></tbody>
+      </table>
+    </div>
+
+    <!-- Assumptions -->
+    <div class="assumptions-box mt-3 mb-4 p-3">
+      <strong>Calculation notes</strong>
+      <ul class="mb-0 mt-1">
+        <li><strong>Buy ISK / %</strong> – Revenue = product sold to best buy order <em>(sales tax only)</em>; Cost = materials from cheapest sell orders + manufacturing tax. No broker fee since you're filling an existing order.</li>
+        <li><strong>Opt. ISK / %</strong> – Revenue = product posted as sell order <em>(broker fee + sales tax)</em>; Cost = materials bought via buy orders <em>(broker fee added)</em> + manufacturing tax.</li>
+        <li><strong>7d Avg (Buy/Opt)</strong> – Same fee structure but using ESI <code>average_price</code> (universe-wide 7-day volume-weighted average) for both product and materials.</li>
+        <li><strong>Manufacturing Tax</strong> = Σ(material adjusted_price × effective_qty) × SCI%. Adjusted price comes from CCP's ESI market prices endpoint.</li>
+        <li><strong>ME%</strong> – Each 1% reduces material quantities: <code>eff_qty = max(1, ⌈base_qty × (1 − ME/100)⌉)</code></li>
+        <li><strong>IpH</strong> – Profit ÷ base manufacturing time (seconds ÷ 3600). Does not apply TE research reduction.</li>
+        <li><strong>Saturation %</strong> – Listed sell volume ÷ 7-day average daily traded volume × 100. Sourced from Jita (The Forge, region 10000002).</li>
+      </ul>
+    </div>
+  </div>
+
+</div><!-- /container -->
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+<script src="https://cdn.datatables.net/1.13.7/js/jquery.dataTables.min.js"></script>
+<script src="https://cdn.datatables.net/1.13.7/js/dataTables.bootstrap5.min.js"></script>
+<script src="/static/js/app.js"></script>
+</body>
+</html>
