@@ -30,6 +30,7 @@ import os
 import sqlite3
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import contextmanager
 
 import requests
@@ -344,51 +345,84 @@ def refresh_market_prices(type_ids: list, force: bool = False):
 
 
 # ── Market history (for saturation) ───────────────────────────────────────────
+def _fetch_history_one(tid: int) -> tuple:
+    """Fetch the 7-day average daily traded volume for one type from ESI."""
+    try:
+        r = requests.get(
+            f"{ESI_BASE}markets/{JITA_REGION_ID}/history/",
+            params={"type_id": tid, "datasource": "tranquility"},
+            timeout=15,
+        )
+        r.raise_for_status()
+        history = r.json()
+        recent  = sorted(history, key=lambda x: x.get("date", ""))[-7:]
+        avg_vol = (
+            sum(float(d.get("volume", 0)) for d in recent) / len(recent)
+            if recent else 0.0
+        )
+        return (tid, avg_vol)
+    except Exception as exc:
+        log.warning("ESI history failed for type %d: %s", tid, exc)
+        return (tid, 0.0)
+
+
 def refresh_market_history(type_ids: list, force: bool = False):
+    """
+    Fetch ESI daily market history and cache the 7-day average daily volume.
+    Uses a thread pool for parallel requests (~20x faster than sequential).
+    Per-item TTL check means only stale/missing items are ever re-fetched.
+    """
     if not type_ids:
         return
 
-    if not force:
-        with db() as conn:
-            oldest = conn.execute(
-                f"SELECT MIN(updated_at) FROM market_history "
-                f"WHERE type_id IN ({','.join('?'*len(type_ids))})",
-                type_ids,
-            ).fetchone()[0] or 0
-        if (time.time() - oldest) < HISTORY_TTL:
-            return
+    now   = int(time.time())
+    CHUNK = 900
 
-    log.info("Fetching ESI market history for %d types…", len(type_ids))
-    now = int(time.time())
+    if force:
+        to_fetch = list(type_ids)
+    else:
+        # Per-item freshness check — only re-fetch what is actually stale/missing
+        fresh: set = set()
+        with db() as conn:
+            for i in range(0, len(type_ids), CHUNK):
+                chunk = type_ids[i : i + CHUNK]
+                rows  = conn.execute(
+                    f"SELECT type_id FROM market_history "
+                    f"WHERE type_id IN ({','.join('?'*len(chunk))}) AND updated_at > ?",
+                    chunk + [now - HISTORY_TTL],
+                ).fetchall()
+                fresh.update(r[0] for r in rows)
+        to_fetch = [t for t in type_ids if t not in fresh]
+
+    if not to_fetch:
+        log.info("Market history: all %d items fresh, skipping.", len(type_ids))
+        return
+
+    log.info(
+        "Fetching ESI market history for %d/%d types (parallel, 20 workers)…",
+        len(to_fetch), len(type_ids),
+    )
+
+    # Parallel fetch — results collected in memory, then written in one DB transaction
+    results: list = []
+    with ThreadPoolExecutor(max_workers=20) as pool:
+        futures = {pool.submit(_fetch_history_one, tid): tid for tid in to_fetch}
+        done    = 0
+        for future in as_completed(futures):
+            results.append(future.result())
+            done += 1
+            if done % 200 == 0:
+                pct = done * 100 // len(to_fetch)
+                _set_status("loading", f"Market history: {done}/{len(to_fetch)} fetched ({pct}%)…")
 
     with db() as conn:
-        for tid in type_ids:
-            try:
-                r = requests.get(
-                    f"{ESI_BASE}markets/{JITA_REGION_ID}/history/",
-                    params={"type_id": tid, "datasource": "tranquility"},
-                    timeout=15,
-                )
-                r.raise_for_status()
-                history = r.json()
-                recent = sorted(history, key=lambda x: x.get("date", ""))[-7:]
-                avg_vol = (
-                    sum(float(d.get("volume", 0)) for d in recent) / len(recent)
-                    if recent else 0.0
-                )
-                conn.execute(
-                    "INSERT OR REPLACE INTO market_history (type_id, avg_daily_vol, updated_at) VALUES (?,?,?)",
-                    (tid, avg_vol, now),
-                )
-                time.sleep(0.05)
-            except Exception as exc:
-                log.warning("ESI history failed for type %d: %s", tid, exc)
-                conn.execute(
-                    "INSERT OR IGNORE INTO market_history (type_id, avg_daily_vol, updated_at) VALUES (?,0,?)",
-                    (tid, now),
-                )
+        for tid, avg_vol in results:
+            conn.execute(
+                "INSERT OR REPLACE INTO market_history (type_id, avg_daily_vol, updated_at) VALUES (?,?,?)",
+                (tid, avg_vol, now),
+            )
 
-    log.info("Market history refreshed.")
+    log.info("Market history fetched for %d items.", len(to_fetch))
 
 
 # ── Build raw component data for the frontend ─────────────────────────────────
