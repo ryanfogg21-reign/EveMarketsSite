@@ -48,7 +48,7 @@ FUZZWORK_MKT = "https://market.fuzzwork.co.uk/aggregates/"
 ESI_BASE     = "https://esi.evetech.net/latest/"
 GEMINI_URL   = (
     "https://generativelanguage.googleapis.com/v1beta/models/"
-    "gemini-1.5-flash:generateContent"
+    "gemini-2.0-flash-lite:generateContent"
 )
 
 CACHE_DIR = os.path.join(os.path.dirname(__file__), "cache")
