@@ -37,73 +37,57 @@
 <div class="container-fluid px-3 mt-2">
   <div class="filter-panel p-3">
 
-    <!-- Row 1: Column toggles + profit filters -->
-    <div class="row g-3 align-items-end mb-3">
-      <div class="col-12 col-lg-auto">
-        <label class="filter-label mb-1 d-block">Hide columns</label>
-        <div class="d-flex flex-wrap gap-2">
-          <div class="form-check form-check-inline mb-0">
-            <input class="form-check-input" type="checkbox" id="chkHideTech" onchange="toggleColumnGroup('tech')">
-            <label class="form-check-label" for="chkHideTech">Tech &amp; Meta</label>
-          </div>
-          <div class="form-check form-check-inline mb-0">
-            <input class="form-check-input" type="checkbox" id="chkHideBuy" onchange="toggleColumnGroup('buy')">
-            <label class="form-check-label" for="chkHideBuy">Calc (Buy)</label>
-          </div>
-          <div class="form-check form-check-inline mb-0">
-            <input class="form-check-input" type="checkbox" id="chkHideOpt" onchange="toggleColumnGroup('opt')">
-            <label class="form-check-label" for="chkHideOpt">Calc (Optimal)</label>
-          </div>
-          <div class="form-check form-check-inline mb-0">
-            <input class="form-check-input" type="checkbox" id="chkHideAvgBuy" onchange="toggleColumnGroup('avgbuy')">
-            <label class="form-check-label" for="chkHideAvgBuy">7d Avg (Buy)</label>
-          </div>
-          <div class="form-check form-check-inline mb-0">
-            <input class="form-check-input" type="checkbox" id="chkHideAvgOpt" onchange="toggleColumnGroup('avgopt')">
-            <label class="form-check-label" for="chkHideAvgOpt">7d Avg (Opt)</label>
-          </div>
-          <div class="form-check form-check-inline mb-0">
-            <input class="form-check-input" type="checkbox" id="chkHideSat" onchange="toggleColumnGroup('sat')">
-            <label class="form-check-label" for="chkHideSat">Saturation</label>
-          </div>
-        </div>
+    <!-- Row 1: Category / Group filters + profit filters -->
+    <div class="row g-2 align-items-end mb-3">
+
+      <div class="col-auto">
+        <label class="filter-label" for="fltCategory">Category</label>
+        <select id="fltCategory" class="form-select form-select-sm filter-input" style="width:160px"
+                onchange="onCategoryChange()">
+          <option value="">All Categories</option>
+        </select>
       </div>
 
-      <div class="col-12 col-lg-auto ms-lg-auto">
-        <div class="row g-2 align-items-end">
-          <div class="col-auto">
-            <label class="filter-label" for="fltMinISK">Min Profit (ISK)</label>
-            <input type="number" id="fltMinISK" class="form-control form-control-sm filter-input" style="width:130px"
-                   placeholder="e.g. 1000000" oninput="applyFilters()">
-          </div>
-          <div class="col-auto">
-            <label class="filter-label" for="fltMinPct">Min Profit (%)</label>
-            <input type="number" id="fltMinPct" class="form-control form-control-sm filter-input" style="width:100px"
-                   placeholder="e.g. 5" oninput="applyFilters()">
-          </div>
-          <div class="col-auto">
-            <label class="filter-label" for="fltMinIpH">Min ISK/Hour</label>
-            <input type="number" id="fltMinIpH" class="form-control form-control-sm filter-input" style="width:130px"
-                   placeholder="e.g. 500000" oninput="applyFilters()">
-          </div>
-          <div class="col-auto">
-            <label class="filter-label" for="fltMaxSat">Max Saturation (%)</label>
-            <input type="number" id="fltMaxSat" class="form-control form-control-sm filter-input" style="width:100px"
-                   placeholder="e.g. 100" oninput="applyFilters()">
-          </div>
-          <div class="col-auto">
-            <label class="filter-label" for="fltMode">Filter using</label>
-            <select id="fltMode" class="form-select form-select-sm filter-input" style="width:130px" onchange="applyFilters()">
-              <option value="buy">Buy (instant)</option>
-              <option value="opt">Optimal</option>
-              <option value="avg_buy">7d Avg (Buy)</option>
-              <option value="avg_opt">7d Avg (Opt)</option>
-            </select>
-          </div>
-          <div class="col-auto">
-            <button class="btn btn-sm btn-secondary" onclick="clearFilters()">Clear</button>
-          </div>
-        </div>
+      <div class="col-auto">
+        <label class="filter-label" for="fltGroup">Group</label>
+        <select id="fltGroup" class="form-select form-select-sm filter-input" style="width:180px"
+                onchange="applyFilters()">
+          <option value="">All Groups</option>
+        </select>
+      </div>
+
+      <div class="col-auto ms-2">
+        <label class="filter-label" for="fltMinISK">Min Profit (ISK)</label>
+        <input type="number" id="fltMinISK" class="form-control form-control-sm filter-input" style="width:130px"
+               placeholder="e.g. 1000000" oninput="applyFilters()">
+      </div>
+      <div class="col-auto">
+        <label class="filter-label" for="fltMinPct">Min Profit (%)</label>
+        <input type="number" id="fltMinPct" class="form-control form-control-sm filter-input" style="width:100px"
+               placeholder="e.g. 5" oninput="applyFilters()">
+      </div>
+      <div class="col-auto">
+        <label class="filter-label" for="fltMinIpH">Min ISK/Hour</label>
+        <input type="number" id="fltMinIpH" class="form-control form-control-sm filter-input" style="width:130px"
+               placeholder="e.g. 500000" oninput="applyFilters()">
+      </div>
+      <div class="col-auto">
+        <label class="filter-label" for="fltMaxSat">Max Saturation (%)</label>
+        <input type="number" id="fltMaxSat" class="form-control form-control-sm filter-input" style="width:100px"
+               placeholder="e.g. 100" oninput="applyFilters()">
+      </div>
+      <div class="col-auto">
+        <label class="filter-label" for="fltMode">Filter using</label>
+        <select id="fltMode" class="form-select form-select-sm filter-input" style="width:130px" onchange="applyFilters()">
+          <option value="buy">Buy (instant)</option>
+          <option value="opt">Optimal</option>
+          <option value="avg_buy">7d Avg (Buy)</option>
+          <option value="avg_opt">7d Avg (Opt)</option>
+        </select>
+      </div>
+      <div class="col-auto">
+        <label class="filter-label d-block">&nbsp;</label>
+        <button class="btn btn-sm btn-secondary" onclick="clearFilters()">Clear</button>
       </div>
     </div>
 
@@ -182,7 +166,7 @@
   <div id="loadingState" class="text-center py-5">
     <div class="spinner-border text-warning mb-3" role="status"></div>
     <p id="loadingMsg" class="text-muted">
-      Initialising… First run downloads SDE blueprint data (~30 s). Subsequent runs use the cache.
+      Initialising… First run downloads SDE data (~60 s). Subsequent runs use the cache.
     </p>
   </div>
 
@@ -191,7 +175,7 @@
     <div class="d-flex align-items-center justify-content-between mb-1">
       <h6 class="mb-0 table-title">
         Manufacturing profit &mdash;
-        <small>Advanced Components (Tech II) &middot; Jita (The Forge)</small>
+        <small>All Tech II items &middot; Jita (The Forge)</small>
       </h6>
       <small id="lastUpdated" class="text-muted"></small>
     </div>
@@ -201,6 +185,7 @@
         <thead>
           <tr>
             <th rowspan="2" class="col-product align-middle">Product</th>
+            <th rowspan="2" class="col-category align-middle">Category</th>
             <th rowspan="2" class="col-group align-middle">Group</th>
             <th rowspan="2" class="th-tech align-middle text-center">Tech</th>
             <th rowspan="2" class="th-meta align-middle text-center">Meta</th>

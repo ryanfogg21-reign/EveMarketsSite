@@ -40,39 +40,30 @@
 // ── Column indices (must match <th> order in index.html) ──────────────────────
 const COL = {
   product:    0,
-  group:      1,
-  tech:       2,
-  meta:       3,
-  buyISK:     4,
-  buyPct:     5,
-  buyIpH:     6,
-  optISK:     7,
-  optPct:     8,
-  optIpH:     9,
-  avgBuyISK:  10,
-  avgBuyPct:  11,
-  avgBuyIpH:  12,
-  avgOptISK:  13,
-  avgOptPct:  14,
-  avgOptIpH:  15,
-  sat:        16,
-  links:      17,
-};
-
-// Column groups for visibility toggling
-const COL_GROUPS = {
-  tech:   [COL.tech, COL.meta],
-  buy:    [COL.buyISK,    COL.buyPct,    COL.buyIpH],
-  opt:    [COL.optISK,    COL.optPct,    COL.optIpH],
-  avgbuy: [COL.avgBuyISK, COL.avgBuyPct, COL.avgBuyIpH],
-  avgopt: [COL.avgOptISK, COL.avgOptPct, COL.avgOptIpH],
-  sat:    [COL.sat],
+  category:   1,
+  group:      2,
+  tech:       3,
+  meta:       4,
+  buyISK:     5,
+  buyPct:     6,
+  buyIpH:     7,
+  optISK:     8,
+  optPct:     9,
+  optIpH:     10,
+  avgBuyISK:  11,
+  avgBuyPct:  12,
+  avgBuyIpH:  13,
+  avgOptISK:  14,
+  avgOptPct:  15,
+  avgOptIpH:  16,
+  sat:        17,
+  links:      18,
 };
 
 // CSS class applied per column group (left border + text colour)
 const COL_CLASSES = {
-  [COL.buyISK]:    'th-buy',  [COL.buyPct]:    'th-buy',  [COL.buyIpH]:    'th-buy',
-  [COL.optISK]:    'th-opt',  [COL.optPct]:    'th-opt',  [COL.optIpH]:    'th-opt',
+  [COL.buyISK]:    'th-buy',    [COL.buyPct]:    'th-buy',    [COL.buyIpH]:    'th-buy',
+  [COL.optISK]:    'th-opt',    [COL.optPct]:    'th-opt',    [COL.optIpH]:    'th-opt',
   [COL.avgBuyISK]: 'th-avgbuy', [COL.avgBuyPct]: 'th-avgbuy', [COL.avgBuyIpH]: 'th-avgbuy',
   [COL.avgOptISK]: 'th-avgopt', [COL.avgOptPct]: 'th-avgopt', [COL.avgOptIpH]: 'th-avgopt',
   [COL.sat]:       'th-sat',
@@ -80,9 +71,9 @@ const COL_CLASSES = {
 };
 
 // ── Globals ───────────────────────────────────────────────────────────────────
-let dataTable   = null;
-let rawData     = [];     // raw items from API (pre-calculation)
-let pollTimer   = null;
+let dataTable = null;
+let rawData   = [];   // raw items from API (pre-calculation)
+let pollTimer = null;
 
 // ── Settings ──────────────────────────────────────────────────────────────────
 function getSettings() {
@@ -103,10 +94,10 @@ function calcItemProfits(item, s) {
   const pqty      = item.product_qty || 1;
   const durationH = (item.duration_sec || 0) / 3600;
 
-  let matCostBuy  = 0;   // Σ sell_pct × eff_qty
-  let matCostOpt  = 0;   // Σ buy_pct  × eff_qty × (1 + bfee)
-  let matCostAvg  = 0;   // Σ avg_price × eff_qty
-  let adjTotal    = 0;   // Σ adjusted_price × eff_qty  (for manufacturing tax)
+  let matCostBuy = 0;
+  let matCostOpt = 0;
+  let matCostAvg = 0;
+  let adjTotal   = 0;
 
   for (const mat of item.materials) {
     const effQty = Math.max(1, Math.ceil(mat.base_qty * meFactor));
@@ -122,7 +113,6 @@ function calcItemProfits(item, s) {
   const totalOpt = matCostOpt + mfgTax;
   const totalAvg = matCostAvg + mfgTax;
 
-  // Revenue per manufacturing run (fees applied to product sale)
   const revBuy    = (item.product.buy_max  || 0) * pqty * (1 - staxRate);
   const revOpt    = (item.product.sell_pct || 0) * pqty * (1 - bfeeRate - staxRate);
   const revAvgBuy = (item.product.avg_price || 0) * pqty * (1 - staxRate);
@@ -173,7 +163,6 @@ function satCls(v) {
 }
 
 // ── Row building ──────────────────────────────────────────────────────────────
-// Each cell is { display: html, sort: number } — DataTables uses render() to pick.
 function makeNumCell(value, fmtFn, extraCls) {
   const cls  = [profCls(value), extraCls || ''].join(' ').trim();
   const html = `<span class="${cls}">${(fmtFn || fmtISK)(value)}</span>`;
@@ -193,10 +182,8 @@ function buildRows(items, settings) {
     const mktUrl   = `https://evemarketer.com/types/${item.type_id}`;
     const iconUrl  = `https://images.evetech.net/types/${item.type_id}/icon`;
 
-    // Build material tooltip (shown on hover)
     const matTip = item.materials.map(m => {
-      const me   = settings.me / 100;
-      const eff  = Math.max(1, Math.ceil(m.base_qty * (1 - me)));
+      const eff = Math.max(1, Math.ceil(m.base_qty * (1 - settings.me / 100)));
       return `${m.name} × ${eff.toLocaleString()}`;
     }).join('\n');
 
@@ -219,6 +206,7 @@ function buildRows(items, settings) {
 
     return [
       { display: nameTd,                                              sort: item.name },
+      { display: escHtml(item.category_name || '—'),                 sort: item.category_name || '' },
       { display: escHtml(item.group || '—'),                         sort: item.group || '' },
       { display: `<span class="badge-tech">${techLabel}</span>`,     sort: item.tech  || 0 },
       { display: String(item.meta || 0),                             sort: item.meta  || 0 },
@@ -287,43 +275,67 @@ function initTable(items) {
   });
 }
 
-// ── Column visibility ─────────────────────────────────────────────────────────
-function toggleColumnGroup(group) {
-  if (!dataTable) return;
-  const cols = COL_GROUPS[group];
-  if (!cols) return;
-  // Derive the checkbox ID from group name
-  const chkId = 'chkHide' + group.charAt(0).toUpperCase() + group.slice(1);
-  const chk = document.getElementById(chkId);
-  const hidden = chk ? chk.checked : false;
-  cols.forEach(c => dataTable.column(c).visible(!hidden));
-}
-
 // ── Settings change ───────────────────────────────────────────────────────────
-function onSettingChange() {
-  rebuildTable();
-}
+function onSettingChange() { rebuildTable(); }
 
 function rebuildTable() {
   if (!dataTable || !rawData.length) return;
-  const settings  = getSettings();
-  const filtered  = getFilteredItems();
-  const rows      = buildRows(filtered, settings);
+  const settings = getSettings();
+  const filtered = getFilteredItems();
+  const rows     = buildRows(filtered, settings);
   dataTable.clear();
   dataTable.rows.add(rows).draw();
 }
 
-// ── Filters ───────────────────────────────────────────────────────────────────
+// ── Category / Group filters ──────────────────────────────────────────────────
+function populateFilters(data) {
+  const categories = [...new Set(data.map(d => d.category_name).filter(Boolean))].sort();
+  const catSel = document.getElementById('fltCategory');
+  catSel.innerHTML = '<option value="">All Categories</option>';
+  categories.forEach(c => {
+    const opt = document.createElement('option');
+    opt.value = c;
+    opt.textContent = c;
+    catSel.appendChild(opt);
+  });
+  _updateGroupOptions(data, '');
+}
+
+function _updateGroupOptions(data, category) {
+  const source = category ? data.filter(d => d.category_name === category) : data;
+  const groups = [...new Set(source.map(d => d.group).filter(Boolean))].sort();
+  const grpSel = document.getElementById('fltGroup');
+  grpSel.innerHTML = '<option value="">All Groups</option>';
+  groups.forEach(g => {
+    const opt = document.createElement('option');
+    opt.value = g;
+    opt.textContent = g;
+    grpSel.appendChild(opt);
+  });
+}
+
+function onCategoryChange() {
+  const cat = document.getElementById('fltCategory').value;
+  _updateGroupOptions(rawData, cat);
+  document.getElementById('fltGroup').value = '';
+  rebuildTable();
+}
+
+// ── Profit / saturation filters ───────────────────────────────────────────────
 function getFilteredItems() {
-  const minISK = parseFloat(document.getElementById('fltMinISK').value);
-  const minPct = parseFloat(document.getElementById('fltMinPct').value);
-  const minIpH = parseFloat(document.getElementById('fltMinIpH').value);
-  const maxSat = parseFloat(document.getElementById('fltMaxSat').value);
-  const mode   = document.getElementById('fltMode').value;   // buy | opt | avg_buy | avg_opt
-  const s      = getSettings();
+  const category = document.getElementById('fltCategory').value;
+  const group    = document.getElementById('fltGroup').value;
+  const minISK   = parseFloat(document.getElementById('fltMinISK').value);
+  const minPct   = parseFloat(document.getElementById('fltMinPct').value);
+  const minIpH   = parseFloat(document.getElementById('fltMinIpH').value);
+  const maxSat   = parseFloat(document.getElementById('fltMaxSat').value);
+  const mode     = document.getElementById('fltMode').value;
+  const s        = getSettings();
 
   return rawData.filter(item => {
-    const p = calcItemProfits(item, s);
+    if (category && item.category_name !== category) return false;
+    if (group    && item.group !== group)             return false;
+    const p      = calcItemProfits(item, s);
     const bucket = p[mode] || p.buy;
     if (!isNaN(minISK) && bucket.isk < minISK) return false;
     if (!isNaN(minPct) && bucket.pct < minPct) return false;
@@ -336,6 +348,9 @@ function getFilteredItems() {
 function applyFilters() { rebuildTable(); }
 
 function clearFilters() {
+  document.getElementById('fltCategory').value = '';
+  _updateGroupOptions(rawData, '');
+  document.getElementById('fltGroup').value = '';
   ['fltMinISK', 'fltMinPct', 'fltMinIpH', 'fltMaxSat'].forEach(id => {
     document.getElementById(id).value = '';
   });
@@ -351,6 +366,7 @@ function fetchComponents() {
       rawData = data;
       document.getElementById('loadingState').classList.add('d-none');
       document.getElementById('tableSection').classList.remove('d-none');
+      populateFilters(data);
       initTable(data);
       document.getElementById('lastUpdated').textContent =
         'Last updated: ' + new Date().toLocaleTimeString();
@@ -388,7 +404,6 @@ function triggerRefresh() {
   fetch('/api/refresh', { method: 'POST' })
     .then(r => r.json())
     .then(() => {
-      // Give the background thread a moment, then re-fetch
       setTimeout(() => {
         fetchComponents();
         btn.disabled = false;
