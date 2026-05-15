@@ -5,6 +5,7 @@ Data sources:
   Fuzzwork SDE CSV dumps  – blueprint materials, activities, type/group/category info
   Fuzzwork Market API     – live Jita buy/sell order aggregates + listed volume
   CCP ESI                 – 7-day avg prices, adjusted prices, market history
+  Google Gemini API       – AI market analysis and predictions (analysis page)
 
 All profit calculations are performed client-side in JavaScript so that the
 user can adjust ME%, system cost index, broker fee, and sales tax in real time
@@ -23,6 +24,7 @@ Profit formula assumptions (enforced in app.js):
 import bz2
 import csv
 import io
+import json
 import logging
 import os
 import sqlite3
@@ -44,17 +46,25 @@ MANUFACTURING_ACTIVITY_ID = 1
 FUZZWORK_SDE = "https://www.fuzzwork.co.uk/dump/latest/"
 FUZZWORK_MKT = "https://market.fuzzwork.co.uk/aggregates/"
 ESI_BASE     = "https://esi.evetech.net/latest/"
+GEMINI_URL   = (
+    "https://generativelanguage.googleapis.com/v1beta/models/"
+    "gemini-1.5-flash:generateContent"
+)
 
 CACHE_DIR = os.path.join(os.path.dirname(__file__), "cache")
 DB_PATH   = os.path.join(CACHE_DIR, "eve.db")
 
-SDE_TTL     = 86_400 * 7   # 7 days
-PRICE_TTL   = 600           # 10 minutes
-HISTORY_TTL = 86_400        # 24 hours (ESI market history is updated once/day)
+SDE_TTL      = 86_400 * 7   # 7 days
+PRICE_TTL    = 600           # 10 minutes
+HISTORY_TTL  = 86_400        # 24 hours
+ANALYSIS_TTL = 43_200        # 12 hours
 
 # ── Shared state ───────────────────────────────────────────────────────────────
-_init_status: dict = {"status": "loading", "message": "Starting up…", "count": 0}
-_type_ids:    list = []
+_init_status:     dict = {"status": "loading", "message": "Starting up…", "count": 0}
+_type_ids:        list = []
+_analysis_status: dict = {"status": "idle",    "message": "", "result": None}
+_analysis_running: bool = False
+_analysis_lock    = threading.Lock()
 
 
 # ── Database ───────────────────────────────────────────────────────────────────
@@ -80,7 +90,6 @@ def init_db():
                 key        TEXT PRIMARY KEY,
                 updated_at INTEGER DEFAULT 0
             );
-            -- Blueprint data
             CREATE TABLE IF NOT EXISTS bp_products (
                 bp_id      INTEGER NOT NULL,
                 product_id INTEGER NOT NULL,
@@ -97,7 +106,6 @@ def init_db():
                 bp_id INTEGER PRIMARY KEY,
                 secs  INTEGER NOT NULL DEFAULT 0
             );
-            -- Type info (products and materials)
             CREATE TABLE IF NOT EXISTS type_info (
                 type_id       INTEGER PRIMARY KEY,
                 name          TEXT    DEFAULT '',
@@ -110,7 +118,6 @@ def init_db():
                 portion_size  INTEGER DEFAULT 1,
                 updated_at    INTEGER DEFAULT 0
             );
-            -- Market prices (current orders)
             CREATE TABLE IF NOT EXISTS market_prices (
                 type_id        INTEGER PRIMARY KEY,
                 buy_max        REAL DEFAULT 0,
@@ -122,23 +129,25 @@ def init_db():
                 adjusted_price REAL DEFAULT 0,
                 updated_at     INTEGER DEFAULT 0
             );
-            -- Market history for saturation calculation
             CREATE TABLE IF NOT EXISTS market_history (
                 type_id       INTEGER PRIMARY KEY,
                 avg_daily_vol REAL    DEFAULT 0,
                 updated_at    INTEGER DEFAULT 0
             );
+            CREATE TABLE IF NOT EXISTS analysis_cache (
+                id         INTEGER PRIMARY KEY,
+                data       TEXT,
+                updated_at INTEGER DEFAULT 0
+            );
         """)
-        # Migration: add category_name if upgrading from older schema
         try:
             conn.execute("ALTER TABLE type_info ADD COLUMN category_name TEXT DEFAULT ''")
         except Exception:
-            pass  # column already exists
+            pass
 
 
 # ── SDE helpers ────────────────────────────────────────────────────────────────
 def _fetch_sde_csv(table: str):
-    """Download and decompress a Fuzzwork SDE CSV, yielding one dict per row."""
     url = f"{FUZZWORK_SDE}{table}.csv.bz2"
     log.info("Fetching SDE: %s", url)
     r = requests.get(url, timeout=120)
@@ -148,11 +157,6 @@ def _fetch_sde_csv(table: str):
 
 
 def load_sde_data():
-    """
-    Download and cache all SDE data: blueprints + full type/group/category info.
-    Type info is sourced from SDE CSVs rather than ESI to avoid thousands of
-    individual API calls and to get complete coverage of all item types.
-    """
     with db() as conn:
         row = conn.execute("SELECT updated_at FROM meta WHERE key='sde'").fetchone()
     if row and (time.time() - row["updated_at"]) < SDE_TTL:
@@ -161,7 +165,6 @@ def load_sde_data():
 
     _set_status("loading", "Downloading SDE blueprint tables (one-time, ~60 s)…")
 
-    # ── Blueprint products ──────────────────────────────────────────────────────
     with db() as conn:
         conn.execute("DELETE FROM bp_products")
         for r in _fetch_sde_csv("industryActivityProducts"):
@@ -174,7 +177,6 @@ def load_sde_data():
                 except (ValueError, KeyError):
                     pass
 
-    # ── Blueprint materials ─────────────────────────────────────────────────────
     with db() as conn:
         conn.execute("DELETE FROM bp_materials")
         for r in _fetch_sde_csv("industryActivityMaterials"):
@@ -187,7 +189,6 @@ def load_sde_data():
                 except (ValueError, KeyError):
                     pass
 
-    # ── Blueprint durations ─────────────────────────────────────────────────────
     with db() as conn:
         conn.execute("DELETE FROM bp_duration")
         for r in _fetch_sde_csv("industryActivity"):
@@ -201,10 +202,8 @@ def load_sde_data():
                 except (ValueError, KeyError):
                     pass
 
-    # ── Type information from SDE ───────────────────────────────────────────────
     _set_status("loading", "Loading type information from SDE…")
 
-    # Categories: categoryID -> name
     categories: dict = {}
     for r in _fetch_sde_csv("invCategories"):
         try:
@@ -212,7 +211,6 @@ def load_sde_data():
         except (ValueError, KeyError):
             pass
 
-    # Groups: groupID -> {name, category_id, category_name}
     groups: dict = {}
     for r in _fetch_sde_csv("invGroups"):
         try:
@@ -225,7 +223,6 @@ def load_sde_data():
         except (ValueError, KeyError):
             pass
 
-    # Meta groups: typeID -> metaGroupID (2 = Tech II)
     meta_groups: dict = {}
     for r in _fetch_sde_csv("invMetaTypes"):
         try:
@@ -233,7 +230,6 @@ def load_sde_data():
         except (ValueError, KeyError):
             pass
 
-    # Types: stream directly into DB row-by-row to avoid large RAM spikes
     with db() as conn:
         conn.execute("DELETE FROM type_info")
         now = int(time.time())
@@ -255,7 +251,7 @@ def load_sde_data():
                         gdata.get("category_id", 0),
                         gdata.get("category_name", ""),
                         meta_groups.get(type_id, 0),
-                        0,  # meta_level not available directly from invTypes
+                        0,
                         int(r.get("portionSize", 1) or 1),
                         now,
                     ),
@@ -270,7 +266,6 @@ def load_sde_data():
 
 
 def get_t2_manufacturable_type_ids() -> list:
-    """Return all type IDs that are Tech II (metaGroupID=2) and have manufacturing blueprints."""
     with db() as conn:
         rows = conn.execute("""
             SELECT DISTINCT bp.product_id
@@ -300,7 +295,6 @@ def refresh_market_prices(type_ids: list, force: bool = False):
 
     log.info("Refreshing market prices for %d types…", len(type_ids))
 
-    # Fuzzwork aggregated orders (batches of 200)
     fuzz_data: dict = {}
     for i in range(0, len(type_ids), 200):
         batch = type_ids[i : i + 200]
@@ -315,7 +309,6 @@ def refresh_market_prices(type_ids: list, force: bool = False):
         except Exception as exc:
             log.error("Fuzzwork market fetch failed: %s", exc)
 
-    # ESI average / adjusted prices (single endpoint, full universe)
     esi_avg: dict = {}
     try:
         r = requests.get(f"{ESI_BASE}markets/prices/", params={"datasource": "tranquility"}, timeout=30)
@@ -354,10 +347,6 @@ def refresh_market_prices(type_ids: list, force: bool = False):
 
 # ── Market history (for saturation) ───────────────────────────────────────────
 def refresh_market_history(type_ids: list, force: bool = False):
-    """
-    Fetch ESI daily market history for each type and compute the 7-day avg
-    daily traded volume.  Cache for 24 h since ESI history is updated once/day.
-    """
     if not type_ids:
         return
 
@@ -371,7 +360,7 @@ def refresh_market_history(type_ids: list, force: bool = False):
         if (time.time() - oldest) < HISTORY_TTL:
             return
 
-    log.info("Fetching ESI market history for %d types (saturation calc)…", len(type_ids))
+    log.info("Fetching ESI market history for %d types…", len(type_ids))
     now = int(time.time())
 
     with db() as conn:
@@ -413,17 +402,12 @@ def _safe_float(v) -> float:
 
 
 def build_component_data(type_ids: list) -> list:
-    """
-    Return one dict per manufacturable T2 item using batched DB queries.
-    All price data is raw – profit calculations happen in JavaScript.
-    """
     if not type_ids:
         return []
 
-    CHUNK = 900  # stay well under SQLite's 999 parameter limit
+    CHUNK = 900
 
     with db() as conn:
-        # All blueprints for the given product IDs
         bp_rows = conn.execute(
             f"SELECT bp_id, product_id, qty FROM bp_products "
             f"WHERE product_id IN ({','.join('?'*len(type_ids))})",
@@ -436,7 +420,6 @@ def build_component_data(type_ids: list) -> list:
         bp_ids   = [r["bp_id"]     for r in bp_rows]
         prod_ids = [r["product_id"] for r in bp_rows]
 
-        # Batch: materials for all blueprints
         mats_by_bp: dict = {}
         for i in range(0, len(bp_ids), CHUNK):
             chunk = bp_ids[i : i + CHUNK]
@@ -446,7 +429,6 @@ def build_component_data(type_ids: list) -> list:
             ).fetchall():
                 mats_by_bp.setdefault(r["bp_id"], []).append(r)
 
-        # Batch: durations
         dur_by_bp: dict = {}
         for i in range(0, len(bp_ids), CHUNK):
             chunk = bp_ids[i : i + CHUNK]
@@ -456,7 +438,6 @@ def build_component_data(type_ids: list) -> list:
             ).fetchall():
                 dur_by_bp[r["bp_id"]] = r["secs"]
 
-        # Batch: type_info for products
         ti_by_id: dict = {}
         for i in range(0, len(prod_ids), CHUNK):
             chunk = prod_ids[i : i + CHUNK]
@@ -465,10 +446,8 @@ def build_component_data(type_ids: list) -> list:
             ).fetchall():
                 ti_by_id[r["type_id"]] = dict(r)
 
-        # Collect all unique material IDs
         all_mat_ids = list({m["mat_id"] for mats in mats_by_bp.values() for m in mats})
 
-        # Batch: type_info for materials (names only)
         mat_name_by_id: dict = {}
         for i in range(0, len(all_mat_ids), CHUNK):
             chunk = all_mat_ids[i : i + CHUNK]
@@ -477,7 +456,6 @@ def build_component_data(type_ids: list) -> list:
             ).fetchall():
                 mat_name_by_id[r["type_id"]] = r["name"]
 
-        # Batch: market prices for products
         mp_by_id: dict = {}
         for i in range(0, len(prod_ids), CHUNK):
             chunk = prod_ids[i : i + CHUNK]
@@ -486,7 +464,6 @@ def build_component_data(type_ids: list) -> list:
             ).fetchall():
                 mp_by_id[r["type_id"]] = dict(r)
 
-        # Batch: market prices for materials
         mat_mp_by_id: dict = {}
         for i in range(0, len(all_mat_ids), CHUNK):
             chunk = all_mat_ids[i : i + CHUNK]
@@ -495,7 +472,6 @@ def build_component_data(type_ids: list) -> list:
             ).fetchall():
                 mat_mp_by_id[r["type_id"]] = dict(r)
 
-        # Batch: market history for products (saturation)
         hist_by_id: dict = {}
         for i in range(0, len(prod_ids), CHUNK):
             chunk = prod_ids[i : i + CHUNK]
@@ -505,7 +481,6 @@ def build_component_data(type_ids: list) -> list:
             ).fetchall():
                 hist_by_id[r["type_id"]] = r["avg_daily_vol"]
 
-    # ── Assemble results ────────────────────────────────────────────────────────
     results = []
     for bp in bp_rows:
         bp_id    = bp["bp_id"]
@@ -586,6 +561,248 @@ def _collect_material_type_ids(product_type_ids: list) -> list:
     return list(mat_ids)
 
 
+# ── AI Analysis ────────────────────────────────────────────────────────────────
+def _build_analysis_items() -> list:
+    """Pull all T2 items with price data into a compact list for the AI prompt."""
+    with db() as conn:
+        # How many T2 blueprints use each type as a material (structural demand signal)
+        dep_rows = conn.execute("""
+            SELECT bm.mat_id, COUNT(DISTINCT bp_outer.product_id) AS dep_count
+            FROM bp_materials bm
+            JOIN bp_products bp_outer ON bm.bp_id = bp_outer.bp_id
+            JOIN type_info ti_outer   ON bp_outer.product_id = ti_outer.type_id
+            WHERE ti_outer.meta_group = 2
+            GROUP BY bm.mat_id
+        """).fetchall()
+        dep_counts = {r["mat_id"]: r["dep_count"] for r in dep_rows}
+
+        rows = conn.execute("""
+            SELECT
+                ti.type_id, ti.name, ti.category_name, ti.group_name,
+                mp.sell_pct, mp.buy_max, mp.avg_price, mp.sell_volume
+            FROM type_info ti
+            JOIN bp_products bpp ON ti.type_id = bpp.product_id
+            JOIN market_prices mp ON ti.type_id = mp.type_id
+            LEFT JOIN market_history mh ON ti.type_id = mh.type_id
+            WHERE ti.meta_group = 2
+              AND (mp.sell_pct > 0 OR mp.buy_max > 0)
+            GROUP BY ti.type_id
+            ORDER BY (COALESCE(mh.avg_daily_vol, 0) * mp.avg_price) DESC
+        """).fetchall()
+
+        hist_rows = conn.execute("""
+            SELECT mh.type_id, mh.avg_daily_vol
+            FROM market_history mh
+            JOIN type_info ti ON mh.type_id = ti.type_id
+            WHERE ti.meta_group = 2
+        """).fetchall()
+        hist_map = {r["type_id"]: r["avg_daily_vol"] for r in hist_rows}
+
+    items = []
+    for r in rows:
+        avg_price     = float(r["avg_price"] or 0)
+        sell_pct      = float(r["sell_pct"]  or 0)
+        avg_daily_vol = float(hist_map.get(r["type_id"], 0))
+        sell_volume   = float(r["sell_volume"] or 0)
+
+        daily_isk_vol   = avg_daily_vol * avg_price
+        price_mom_pct   = ((sell_pct - avg_price) / avg_price * 100) if avg_price > 0 else 0
+        saturation_pct  = (sell_volume / avg_daily_vol * 100) if avg_daily_vol > 0 else None
+        dep_count       = dep_counts.get(r["type_id"], 0)
+
+        items.append({
+            "type_id":        r["type_id"],
+            "name":           r["name"],
+            "category":       r["category_name"] or "Unknown",
+            "group":          r["group_name"]    or "Unknown",
+            "sell_price":     sell_pct,
+            "avg_price":      avg_price,
+            "buy_price":      float(r["buy_max"] or 0),
+            "price_mom_pct":  round(price_mom_pct, 1),
+            "daily_isk_vol":  daily_isk_vol,
+            "saturation_pct": round(saturation_pct, 1) if saturation_pct is not None else None,
+            "dep_count":      dep_count,
+        })
+
+    return items
+
+
+def _fmt_compact(v: float, unit: str = "") -> str:
+    """Format a large number compactly for the AI prompt."""
+    if v == 0:
+        return "0"
+    if v >= 1e9:
+        return f"{v/1e9:.1f}B{unit}"
+    if v >= 1e6:
+        return f"{v/1e6:.1f}M{unit}"
+    if v >= 1e3:
+        return f"{v/1e3:.0f}k{unit}"
+    return f"{v:.0f}{unit}"
+
+
+def _build_analysis_prompt(items: list) -> str:
+    header = "type_id|name|category|group|sell|avg_7d|Δ_vs_7d|isk_vol_day|sat%|used_in_T2_BPs"
+    rows = []
+    for item in items:
+        sat = f"{item['saturation_pct']:.0f}" if item["saturation_pct"] is not None else "?"
+        rows.append(
+            f"{item['type_id']}|{item['name']}|{item['category']}|{item['group']}|"
+            f"{_fmt_compact(item['sell_price'])}|{_fmt_compact(item['avg_price'])}|"
+            f"{item['price_mom_pct']:+.1f}%|{_fmt_compact(item['daily_isk_vol'])}|"
+            f"{sat}%|{item['dep_count']}"
+        )
+    data_block = "\n".join(rows)
+
+    return f"""You are an expert Eve Online market analyst specialising in Tech II manufacturing.
+
+Analyse ALL of the following T2 manufacturable items and produce buy/sell ratings for each.
+
+COLUMN GUIDE:
+- sell            = current Jita sell order price (5th percentile)
+- avg_7d          = ESI 7-day volume-weighted average price (universe-wide)
+- Δ_vs_7d         = (sell - avg_7d) / avg_7d × 100. Negative = current price BELOW avg (potential recovery). Positive = above avg (may retrace).
+- isk_vol_day     = avg_daily_vol × avg_price (market liquidity — how much ISK trades per day)
+- sat%            = sell_volume / avg_daily_vol × 100. Low (<50%) = undersupplied. High (>200%) = oversupplied.
+- used_in_T2_BPs  = count of other T2 blueprints that require this item as a material (structural demand).
+
+RATING CRITERIA (apply ALL signals together):
+- STRONG BUY:  sat% < 50 AND Δ_vs_7d < -5% AND isk_vol_day high → undersupplied + price dip + real demand
+- GOOD BUY:    sat% < 100 AND (Δ_vs_7d < 0 OR used_in_T2_BPs >= 3) → moderate opportunity
+- HOLD:        no strong signals in either direction; stable market
+- AVOID:       sat% > 200 OR (Δ_vs_7d > +15% AND sat% > 120) → oversupplied or price likely to retrace
+
+{header}
+{data_block}
+
+Return ONLY valid JSON — no markdown, no code fences — with this exact structure:
+{{
+  "market_summary": "3-4 sentence overall T2 market assessment covering the broadest trends visible in the data",
+  "key_insights": [
+    "Actionable insight 1 (cite specific items or categories)",
+    "Actionable insight 2",
+    "Actionable insight 3",
+    "Actionable insight 4",
+    "Actionable insight 5"
+  ],
+  "strong_buy": [
+    {{
+      "type_id": 12345,
+      "name": "Item Name",
+      "projected_upside_pct": 15,
+      "confidence": "high",
+      "reasoning": "1-2 sentences citing specific numbers from the data"
+    }}
+  ],
+  "good_buy": [ same structure as strong_buy ],
+  "hold": [
+    {{ "type_id": 12345, "name": "Item Name", "reasoning": "Brief reason" }}
+  ],
+  "avoid": [
+    {{ "type_id": 12345, "name": "Item Name", "reasoning": "Brief reason" }}
+  ]
+}}
+
+Rate ALL items — every item must appear in exactly one of: strong_buy, good_buy, hold, avoid.
+Aim for: 5-15 strong_buy, 15-30 good_buy, the rest in hold, 5-15 avoid.
+Keep each reasoning under 80 words. projected_upside_pct is the expected % price recovery (strong_buy/good_buy only).
+"""
+
+
+def _call_gemini(prompt: str) -> dict:
+    api_key = os.environ.get("GEMINI_API_KEY", "")
+    if not api_key:
+        raise RuntimeError("GEMINI_API_KEY environment variable is not set.")
+
+    r = requests.post(
+        GEMINI_URL,
+        params={"key": api_key},
+        json={
+            "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+            "generationConfig": {
+                "responseMimeType": "application/json",
+                "temperature":      0.2,
+                "maxOutputTokens":  8192,
+            },
+        },
+        timeout=180,
+    )
+    r.raise_for_status()
+
+    data = r.json()
+    raw  = data["candidates"][0]["content"]["parts"][0]["text"]
+    # Strip any accidental markdown fences
+    raw  = raw.strip().lstrip("```json").lstrip("```").rstrip("```").strip()
+    return json.loads(raw)
+
+
+def _enrich_ratings(result: dict, items_by_id: dict) -> dict:
+    """Attach current market data to each rated item for UI display."""
+    for section in ("strong_buy", "good_buy", "hold", "avoid"):
+        enriched = []
+        for item in result.get(section, []):
+            tid = item.get("type_id")
+            if tid and tid in items_by_id:
+                d = items_by_id[tid]
+                item.update({
+                    "category":       d["category"],
+                    "group":          d["group"],
+                    "sell_price":     d["sell_price"],
+                    "avg_price":      d["avg_price"],
+                    "buy_price":      d["buy_price"],
+                    "price_mom_pct":  d["price_mom_pct"],
+                    "daily_isk_vol":  d["daily_isk_vol"],
+                    "saturation_pct": d["saturation_pct"],
+                    "dep_count":      d["dep_count"],
+                })
+            enriched.append(item)
+        result[section] = enriched
+    return result
+
+
+def _run_analysis():
+    global _analysis_running
+    try:
+        _analysis_status["status"]  = "running"
+        _analysis_status["message"] = "Gathering market data from database…"
+        _analysis_status["result"]  = None
+
+        items = _build_analysis_items()
+        if not items:
+            _analysis_status["status"]  = "error"
+            _analysis_status["message"] = "No price data available yet — run the manufacturing init first."
+            return
+
+        _analysis_status["message"] = f"Sending {len(items)} items to Gemini for analysis…"
+        log.info("AI analysis: sending %d items to Gemini", len(items))
+
+        prompt = _build_analysis_prompt(items)
+        result = _call_gemini(prompt)
+
+        items_by_id = {item["type_id"]: item for item in items}
+        result = _enrich_ratings(result, items_by_id)
+        result["generated_at"] = time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime())
+        result["item_count"]   = len(items)
+
+        with db() as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO analysis_cache (id, data, updated_at) VALUES (1, ?, ?)",
+                (json.dumps(result), int(time.time())),
+            )
+
+        _analysis_status["status"]  = "ready"
+        _analysis_status["message"] = "Analysis complete."
+        _analysis_status["result"]  = result
+        log.info("AI analysis complete.")
+
+    except Exception as exc:
+        log.exception("AI analysis failed")
+        _analysis_status["status"]  = "error"
+        _analysis_status["message"] = str(exc)
+    finally:
+        with _analysis_lock:
+            _analysis_running = False
+
+
 # ── Status helpers ─────────────────────────────────────────────────────────────
 def _set_status(status: str, message: str = "", count: int = 0):
     _init_status["status"]  = status
@@ -599,11 +816,8 @@ def _background_init():
     global _type_ids
     try:
         init_db()
-
-        # SDE: blueprints + full type/group/category data from CSV dumps
         load_sde_data()
 
-        # All T2 items with blueprints — pure DB query, no ESI calls needed
         _set_status("loading", "Discovering T2 manufacturable types…")
         tids = get_t2_manufacturable_type_ids()
         if not tids:
@@ -632,7 +846,6 @@ _init_started = False
 _init_lock    = threading.Lock()
 
 def ensure_init():
-    """Start background init exactly once, regardless of which request arrives first."""
     global _init_started
     if _init_started:
         return
@@ -647,6 +860,12 @@ def ensure_init():
 def index():
     ensure_init()
     return render_template("index.html")
+
+
+@app.route("/analysis")
+def analysis():
+    ensure_init()
+    return render_template("analysis.html")
 
 
 @app.route("/api/status")
@@ -677,6 +896,54 @@ def api_refresh():
 
     threading.Thread(target=_do, daemon=True).start()
     return jsonify({"status": "refresh started"})
+
+
+@app.route("/api/analysis/run", methods=["POST"])
+def api_analysis_run():
+    global _analysis_running
+    ensure_init()
+
+    # Return cached result if still fresh
+    with db() as conn:
+        cached = conn.execute(
+            "SELECT data, updated_at FROM analysis_cache WHERE id=1"
+        ).fetchone()
+    if cached and (time.time() - cached["updated_at"]) < ANALYSIS_TTL:
+        result = json.loads(cached["data"])
+        _analysis_status["status"] = "ready"
+        _analysis_status["result"] = result
+        return jsonify({"status": "ready", "result": result})
+
+    with _analysis_lock:
+        if _analysis_running:
+            return jsonify({"status": "running", "message": _analysis_status.get("message", "")})
+        _analysis_running = True
+
+    threading.Thread(target=_run_analysis, daemon=True).start()
+    return jsonify({"status": "started"})
+
+
+@app.route("/api/analysis/result")
+def api_analysis_result():
+    ensure_init()
+    if _analysis_status["status"] == "ready" and _analysis_status.get("result"):
+        return jsonify({"status": "ready", "result": _analysis_status["result"]})
+
+    # Try DB cache on cold start (status reset after restart)
+    with db() as conn:
+        cached = conn.execute(
+            "SELECT data, updated_at FROM analysis_cache WHERE id=1"
+        ).fetchone()
+    if cached and (time.time() - cached["updated_at"]) < ANALYSIS_TTL:
+        result = json.loads(cached["data"])
+        _analysis_status["status"] = "ready"
+        _analysis_status["result"] = result
+        return jsonify({"status": "ready", "result": result})
+
+    return jsonify({
+        "status":  _analysis_status["status"],
+        "message": _analysis_status.get("message", ""),
+    })
 
 
 if __name__ == "__main__":

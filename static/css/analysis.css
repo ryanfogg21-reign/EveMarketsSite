@@ -1,0 +1,278 @@
+/* ── Analysis page styles ──────────────────────────────────────────────────── */
+
+.analysis-hero {
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border);
+}
+
+/* Rating chips used in the hero description */
+.rating-chip {
+  display: inline-block;
+  padding: 0.05rem 0.45rem;
+  border-radius: 3px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+}
+.rating-chip.strong-buy { background: var(--green-dim);  color: var(--green);  }
+.rating-chip.good-buy   { background: var(--accent-dim); color: var(--accent); }
+.rating-chip.hold       { background: #1e2235;           color: var(--text-muted); }
+.rating-chip.avoid      { background: var(--red-dim);    color: var(--red);    }
+
+/* ── Cards ───────────────────────────────────────────────────────────────────  */
+.analysis-card {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 1rem 1.1rem;
+}
+
+.summary-card { border-left: 3px solid var(--yellow); }
+
+.card-label {
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--yellow);
+  font-weight: 700;
+  margin-bottom: 0.5rem;
+}
+
+/* ── Key insights list ───────────────────────────────────────────────────────  */
+.insights-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.insights-list li {
+  font-size: 0.8rem;
+  color: var(--text);
+  padding-left: 1.1rem;
+  position: relative;
+  line-height: 1.45;
+}
+.insights-list li::before {
+  content: "▸";
+  position: absolute;
+  left: 0;
+  color: var(--accent);
+}
+
+/* ── Rating tabs ─────────────────────────────────────────────────────────────  */
+.rating-tabs {
+  display: flex;
+  gap: 0.4rem;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 0;
+}
+.rtab {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  font-weight: 600;
+  padding: 0.5rem 0.9rem;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+  position: relative;
+  bottom: -1px;
+}
+.rtab:hover { color: var(--text); }
+
+.rtab.active[data-section="strong_buy"] { color: var(--green);  border-color: var(--green);  }
+.rtab.active[data-section="good_buy"]   { color: var(--accent); border-color: var(--accent); }
+.rtab.active[data-section="hold"]       { color: var(--text);   border-color: var(--text);   }
+.rtab.active[data-section="avoid"]      { color: var(--red);    border-color: var(--red);    }
+
+.rtab-count {
+  display: inline-block;
+  min-width: 1.4rem;
+  text-align: center;
+  background: var(--bg-panel);
+  border-radius: 3px;
+  font-size: 0.67rem;
+  font-weight: 700;
+  padding: 0 0.3rem;
+  margin-left: 0.3rem;
+}
+
+/* ── Item card grid ──────────────────────────────────────────────────────────  */
+.items-section {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 0.75rem;
+  padding-top: 0.75rem;
+}
+
+/* Hold section uses a more compact 4-col layout */
+#section-hold.items-section {
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+}
+
+/* ── Individual item card ────────────────────────────────────────────────────  */
+.item-card {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  transition: border-color 0.15s, transform 0.1s;
+}
+.item-card:hover {
+  transform: translateY(-1px);
+}
+
+.item-card.strong-buy { border-left: 3px solid var(--green);  }
+.item-card.good-buy   { border-left: 3px solid var(--accent); }
+.item-card.hold       { border-left: 3px solid var(--border); }
+.item-card.avoid      { border-left: 3px solid var(--red);    }
+
+/* Card header */
+.ic-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.6rem 0.75rem 0.4rem;
+}
+.ic-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 3px;
+  flex-shrink: 0;
+  background: var(--bg-deep);
+}
+.ic-title {
+  flex: 1;
+  min-width: 0;
+}
+.ic-name {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--accent);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-decoration: none;
+  display: block;
+}
+.ic-name:hover { color: #9ec8ff; text-decoration: underline; }
+
+.ic-meta {
+  font-size: 0.67rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ic-links {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex-shrink: 0;
+}
+.ic-link {
+  font-size: 0.65rem;
+  color: var(--text-muted);
+  text-decoration: none;
+  border: 1px solid var(--border);
+  padding: 0.08rem 0.3rem;
+  border-radius: 2px;
+  text-align: center;
+  transition: background 0.1s;
+  white-space: nowrap;
+}
+.ic-link:hover { background: var(--accent-dim); color: var(--accent); border-color: var(--accent-dim); }
+
+/* Card stats row */
+.ic-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+.ic-stat {
+  padding: 0.35rem 0.6rem;
+  border-right: 1px solid var(--border);
+}
+.ic-stat:last-child { border-right: none; }
+.ic-stat-label {
+  font-size: 0.6rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.ic-stat-value {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* Δ vs 7d avg colour */
+.delta-pos { color: var(--red);   }   /* above avg — potentially overpriced */
+.delta-neg { color: var(--green); }   /* below avg — potential recovery     */
+.delta-neu { color: var(--text-muted); }
+
+/* Saturation colour */
+.sat-low  { color: var(--green);        }
+.sat-mid  { color: var(--yellow);       }
+.sat-high { color: var(--red);          }
+.sat-none { color: var(--text-muted);   }
+
+/* Card upside row */
+.ic-upside {
+  padding: 0.35rem 0.75rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  border-bottom: 1px solid var(--border);
+}
+.upside-pct {
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+.upside-pct.strong-buy { color: var(--green);  }
+.upside-pct.good-buy   { color: var(--accent); }
+.upside-pct.avoid      { color: var(--red);    }
+
+.confidence-badge {
+  display: inline-block;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  padding: 0.08rem 0.35rem;
+  border-radius: 3px;
+  text-transform: uppercase;
+}
+.conf-high   { background: var(--green-dim);  color: var(--green);  }
+.conf-medium { background: var(--yellow-dim); color: var(--yellow); }
+.conf-low    { background: #1e2235;           color: var(--text-muted); }
+
+/* Card reasoning */
+.ic-reasoning {
+  padding: 0.45rem 0.75rem 0.55rem;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  line-height: 1.5;
+  flex: 1;
+}
+
+/* ── Hold / avoid compact card ───────────────────────────────────────────────  */
+.item-card.compact .ic-header { padding: 0.45rem 0.65rem; }
+.item-card.compact .ic-icon   { width: 22px; height: 22px; }
+.item-card.compact .ic-name   { font-size: 0.77rem; }
+.item-card.compact .ic-reasoning { padding: 0.3rem 0.65rem 0.4rem; font-size: 0.72rem; }
+
+/* ── Responsive ──────────────────────────────────────────────────────────────  */
+@media (max-width: 576px) {
+  .items-section { grid-template-columns: 1fr; }
+  .ic-stats { grid-template-columns: repeat(2, 1fr); }
+}
