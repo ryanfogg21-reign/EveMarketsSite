@@ -367,7 +367,13 @@ function fetchComponents() {
       document.getElementById('loadingState').classList.add('d-none');
       document.getElementById('tableSection').classList.remove('d-none');
       populateFilters(data);
-      initTable(data);
+      // Default to Ship category on first load
+      const catSel = document.getElementById('fltCategory');
+      if ([...catSel.options].some(o => o.value === 'Ship')) {
+        catSel.value = 'Ship';
+        _updateGroupOptions(rawData, 'Ship');
+      }
+      initTable(getFilteredItems());
       document.getElementById('lastUpdated').textContent =
         'Last updated: ' + new Date().toLocaleTimeString();
       setEsiStatus('ok', `ESI available · ${data.length} items`);

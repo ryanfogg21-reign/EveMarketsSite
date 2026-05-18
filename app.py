@@ -334,9 +334,10 @@ def get_t2_manufacturable_type_ids() -> list:
             FROM bp_products bp
             INNER JOIN type_info ti ON bp.product_id = ti.type_id
             WHERE ti.meta_group = 2
+               OR ti.category_name = 'Component'
         """).fetchall()
     result = [r[0] for r in rows]
-    log.info("Found %d T2 manufacturable type IDs", len(result))
+    log.info("Found %d manufacturable type IDs (T2 + Components)", len(result))
     return result
 
 
