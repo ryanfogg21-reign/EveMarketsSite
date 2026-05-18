@@ -60,6 +60,16 @@ PRICE_TTL    = 600           # 10 minutes
 HISTORY_TTL  = 86_400        # 24 hours
 ANALYSIS_TTL = 43_200        # 12 hours
 
+# Commodity-category groups that are manufacturing components — shown as
+# "Component" in the UI even though the SDE calls them Commodity.
+COMPONENT_GROUPS = {
+    'Construction Components',
+    'Capital Construction Components',
+    'Advanced Capital Construction Components',
+    'Hybrid Tech Components',
+    'Structure Components',
+}
+
 # ── Shared state ───────────────────────────────────────────────────────────────
 _init_status:     dict = {"status": "loading", "message": "Starting up…", "count": 0}
 _type_ids:        list = []
@@ -328,14 +338,16 @@ def load_sde_data():
 
 
 def get_t2_manufacturable_type_ids() -> list:
+    grp_ph = ','.join('?' * len(COMPONENT_GROUPS))
     with db() as conn:
-        rows = conn.execute("""
-            SELECT DISTINCT bp.product_id
-            FROM bp_products bp
-            INNER JOIN type_info ti ON bp.product_id = ti.type_id
-            WHERE ti.meta_group = 2
-               OR ti.category_name = 'Component'
-        """).fetchall()
+        rows = conn.execute(
+            f"""SELECT DISTINCT bp.product_id
+                FROM bp_products bp
+                INNER JOIN type_info ti ON bp.product_id = ti.type_id
+                WHERE ti.meta_group = 2
+                   OR ti.group_name IN ({grp_ph})""",
+            list(COMPONENT_GROUPS),
+        ).fetchall()
     result = [r[0] for r in rows]
     log.info("Found %d manufacturable type IDs (T2 + Components)", len(result))
     return result
@@ -616,12 +628,15 @@ def build_component_data(type_ids: list) -> list:
                 "adjusted_price": _safe_float(mp.get("adjusted_price", 0)),
             })
 
+        grp_name  = ti["group_name"]
+        cat_name  = "Component" if grp_name in COMPONENT_GROUPS else ti.get("category_name", "")
+
         results.append({
             "type_id":       prod_id,
             "name":          ti["name"],
-            "group":         ti["group_name"],
+            "group":         grp_name,
             "category_id":   ti["category_id"],
-            "category_name": ti.get("category_name", ""),
+            "category_name": cat_name,
             "avg_daily_vol": avg_daily_vol,
             "duration_sec":  dur_by_bp.get(bp_id, 0),
             "product_qty":   prod_qty,
