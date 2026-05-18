@@ -323,24 +323,15 @@ function onCategoryChange() {
 
 // ── Profit / saturation filters ───────────────────────────────────────────────
 function getFilteredItems() {
-  const category = document.getElementById('fltCategory').value;
-  const group    = document.getElementById('fltGroup').value;
-  const minISK   = parseFloat(document.getElementById('fltMinISK').value);
-  const minPct   = parseFloat(document.getElementById('fltMinPct').value);
-  const minIpH   = parseFloat(document.getElementById('fltMinIpH').value);
-  const maxSat   = parseFloat(document.getElementById('fltMaxSat').value);
-  const mode     = document.getElementById('fltMode').value;
-  const s        = getSettings();
+  const category   = document.getElementById('fltCategory').value;
+  const group      = document.getElementById('fltGroup').value;
+  const profitable = document.getElementById('fltProfitable').checked;
+  const s          = getSettings();
 
   return rawData.filter(item => {
     if (category && item.category_name !== category) return false;
     if (group    && item.group !== group)             return false;
-    const p      = calcItemProfits(item, s);
-    const bucket = p[mode] || p.buy;
-    if (!isNaN(minISK) && bucket.isk < minISK) return false;
-    if (!isNaN(minPct) && bucket.pct < minPct) return false;
-    if (!isNaN(minIpH) && bucket.iph < minIpH) return false;
-    if (!isNaN(maxSat) && item.saturation !== null && item.saturation > maxSat) return false;
+    if (profitable && calcItemProfits(item, s).buy.iph <= 0) return false;
     return true;
   });
 }
@@ -351,10 +342,7 @@ function clearFilters() {
   document.getElementById('fltCategory').value = '';
   _updateGroupOptions(rawData, '');
   document.getElementById('fltGroup').value = '';
-  ['fltMinISK', 'fltMinPct', 'fltMinIpH', 'fltMaxSat'].forEach(id => {
-    document.getElementById(id).value = '';
-  });
-  document.getElementById('fltMode').value = 'buy';
+  document.getElementById('fltProfitable').checked = false;
   rebuildTable();
 }
 

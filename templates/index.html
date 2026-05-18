@@ -57,38 +57,14 @@
         </select>
       </div>
 
-      <div class="col-auto ms-2">
-        <label class="filter-label" for="fltMinISK">Min Profit (ISK)</label>
-        <input type="number" id="fltMinISK" class="form-control form-control-sm filter-input" style="width:130px"
-               placeholder="e.g. 1000000" oninput="applyFilters()">
-      </div>
-      <div class="col-auto">
-        <label class="filter-label" for="fltMinPct">Min Profit (%)</label>
-        <input type="number" id="fltMinPct" class="form-control form-control-sm filter-input" style="width:100px"
-               placeholder="e.g. 5" oninput="applyFilters()">
-      </div>
-      <div class="col-auto">
-        <label class="filter-label" for="fltMinIpH">Min ISK/Hour</label>
-        <input type="number" id="fltMinIpH" class="form-control form-control-sm filter-input" style="width:130px"
-               placeholder="e.g. 500000" oninput="applyFilters()">
-      </div>
-      <div class="col-auto">
-        <label class="filter-label" for="fltMaxSat">Max Saturation (%)</label>
-        <input type="number" id="fltMaxSat" class="form-control form-control-sm filter-input" style="width:100px"
-               placeholder="e.g. 100" oninput="applyFilters()">
-      </div>
-      <div class="col-auto">
-        <label class="filter-label" for="fltMode">Filter using</label>
-        <select id="fltMode" class="form-select form-select-sm filter-input" style="width:130px" onchange="applyFilters()">
-          <option value="buy">Buy (instant)</option>
-          <option value="opt">Optimal</option>
-          <option value="avg_buy">7d Avg (Buy)</option>
-          <option value="avg_opt">7d Avg (Opt)</option>
-        </select>
-      </div>
-      <div class="col-auto">
-        <label class="filter-label d-block">&nbsp;</label>
-        <button class="btn btn-sm btn-secondary" onclick="clearFilters()">Clear</button>
+      <div class="col-auto ms-2 d-flex align-items-end">
+        <div class="form-check mb-1">
+          <input class="form-check-input" type="checkbox" id="fltProfitable" onchange="applyFilters()">
+          <label class="form-check-label filter-label" for="fltProfitable">
+            Profitable only
+            <span class="tip" title="Show only items where Buy ISK/Hour > 0 (selling to buy orders at current prices covers all manufacturing costs).">?</span>
+          </label>
+        </div>
       </div>
     </div>
 
