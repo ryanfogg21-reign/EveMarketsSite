@@ -721,7 +721,7 @@ def _build_analysis_items() -> list:
         price_mom_pct   = ((sell_pct - avg_price) / avg_price * 100) if avg_price > 0 else 0
         saturation_pct  = (sell_volume / avg_daily_vol * 100) if avg_daily_vol > 0 else None
         dep_count       = dep_counts.get(r["type_id"], 0)
-        parents         = parent_map.get(r["type_id"], [])[:5]
+        parents         = parent_map.get(r["type_id"], [])[:3]
 
         items.append({
             "type_id":        r["type_id"],
@@ -759,7 +759,7 @@ def _build_analysis_prompt(items: list) -> str:
     rows = []
     for item in items:
         sat = f"{item['saturation_pct']:.0f}" if item["saturation_pct"] is not None else "?"
-        parents_str = "; ".join(item.get("parents", [])) or "none"
+        parents_str = "; ".join(p[:20] for p in item.get("parents", [])) or "none"
         rows.append(
             f"{item['type_id']}|{item['name']}|{item['category']}|{item['group']}|"
             f"{_fmt_compact(item['sell_price'])}|{_fmt_compact(item['avg_price'])}|"
@@ -899,9 +899,9 @@ def _run_analysis():
             _analysis_status["message"] = "No price data available yet — run the manufacturing init first."
             return
 
-        # Cap at top 100 by daily ISK volume to stay within Groq's per-request size limit.
+        # Cap at top 60 by daily ISK volume to stay within Groq's request size limit.
         # Items are already sorted by daily_isk_vol DESC so we keep the most liquid ones.
-        MAX_ITEMS = 100
+        MAX_ITEMS = 60
         if len(items) > MAX_ITEMS:
             log.info("Capping analysis dataset from %d to %d items", len(items), MAX_ITEMS)
             items = items[:MAX_ITEMS]
