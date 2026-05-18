@@ -13,6 +13,10 @@ env/
 cache/
 *.db
 
+# data/ is tracked (contains the committed SDE seed for fast cold starts)
+# but ignore any accidental .db files dropped inside it
+data/*.db
+
 # OS
 .DS_Store
 Thumbs.db

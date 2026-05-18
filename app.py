@@ -23,6 +23,7 @@ Profit formula assumptions (enforced in app.js):
 
 import bz2
 import csv
+import gzip
 import io
 import json
 import logging
@@ -50,8 +51,9 @@ ESI_BASE     = "https://esi.evetech.net/latest/"
 GROQ_URL     = "https://api.groq.com/openai/v1/chat/completions"
 GROQ_MODEL   = "llama-3.3-70b-versatile"
 
-CACHE_DIR = os.path.join(os.path.dirname(__file__), "cache")
-DB_PATH   = os.path.join(CACHE_DIR, "eve.db")
+CACHE_DIR    = os.path.join(os.path.dirname(__file__), "cache")
+DB_PATH      = os.path.join(CACHE_DIR, "eve.db")
+SDE_SEED_PATH = os.path.join(os.path.dirname(__file__), "data", "sde_seed.json.gz")
 
 SDE_TTL      = 86_400 * 7   # 7 days
 PRICE_TTL    = 600           # 10 minutes
@@ -146,6 +148,47 @@ def init_db():
 
 
 # ── SDE helpers ────────────────────────────────────────────────────────────────
+def _save_sde_seed():
+    """Snapshot the static SDE tables to data/sde_seed.json.gz for fast cold starts."""
+    os.makedirs(os.path.dirname(SDE_SEED_PATH), exist_ok=True)
+    with db() as conn:
+        seed = {
+            "generated_at": int(time.time()),
+            "bp_products":  [list(r) for r in conn.execute("SELECT bp_id, product_id, qty FROM bp_products").fetchall()],
+            "bp_materials": [list(r) for r in conn.execute("SELECT bp_id, mat_id, qty FROM bp_materials").fetchall()],
+            "bp_duration":  [list(r) for r in conn.execute("SELECT bp_id, secs FROM bp_duration").fetchall()],
+            "type_info":    [list(r) for r in conn.execute(
+                "SELECT type_id, name, group_id, group_name, category_id, category_name, "
+                "meta_group, meta_level, portion_size FROM type_info"
+            ).fetchall()],
+        }
+    with gzip.open(SDE_SEED_PATH, "wt", encoding="utf-8") as f:
+        json.dump(seed, f)
+    log.info("SDE seed saved (%d types, %d blueprints).", len(seed["type_info"]), len(seed["bp_products"]))
+
+
+def _load_sde_seed():
+    """Populate static SDE tables from data/sde_seed.json.gz — ~5 s vs ~60 s download."""
+    with gzip.open(SDE_SEED_PATH, "rt", encoding="utf-8") as f:
+        seed = json.load(f)
+    now = int(time.time())
+    with db() as conn:
+        conn.execute("DELETE FROM bp_products")
+        conn.executemany("INSERT INTO bp_products VALUES (?,?,?)", seed["bp_products"])
+        conn.execute("DELETE FROM bp_materials")
+        conn.executemany("INSERT INTO bp_materials VALUES (?,?,?)", seed["bp_materials"])
+        conn.execute("DELETE FROM bp_duration")
+        conn.executemany("INSERT INTO bp_duration VALUES (?,?)", seed["bp_duration"])
+        conn.execute("DELETE FROM type_info")
+        conn.executemany(
+            "INSERT INTO type_info (type_id, name, group_id, group_name, category_id, "
+            "category_name, meta_group, meta_level, portion_size, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+            [r + [now] for r in seed["type_info"]],
+        )
+        conn.execute("INSERT OR REPLACE INTO meta VALUES ('sde', ?)", (seed["generated_at"],))
+    log.info("SDE seed loaded (%d types, %d blueprints).", len(seed["type_info"]), len(seed["bp_products"]))
+
+
 def _fetch_sde_csv(table: str):
     url = f"{FUZZWORK_SDE}{table}.csv.bz2"
     log.info("Fetching SDE: %s", url)
@@ -161,6 +204,20 @@ def load_sde_data():
     if row and (time.time() - row["updated_at"]) < SDE_TTL:
         log.info("SDE data fresh – skipping download.")
         return
+
+    # Fast path: load from bundled seed if it exists and isn't older than SDE_TTL
+    if os.path.exists(SDE_SEED_PATH):
+        try:
+            with gzip.open(SDE_SEED_PATH, "rt", encoding="utf-8") as f:
+                seed_header = json.load(f)
+            seed_age = time.time() - seed_header.get("generated_at", 0)
+            if seed_age < SDE_TTL:
+                _set_status("loading", "Loading SDE data from bundled snapshot…")
+                _load_sde_seed()
+                return
+            log.info("Bundled SDE seed is %.0f days old — re-downloading.", seed_age / 86400)
+        except Exception as exc:
+            log.warning("Failed to read SDE seed (%s) — falling back to download.", exc)
 
     _set_status("loading", "Downloading SDE blueprint tables (one-time, ~60 s)…")
 
@@ -262,6 +319,12 @@ def load_sde_data():
         conn.execute("INSERT OR REPLACE INTO meta VALUES ('sde', ?)", (int(time.time()),))
 
     log.info("SDE data loaded.")
+
+    # Update the bundled seed so future deploys / cold starts are fast
+    try:
+        _save_sde_seed()
+    except Exception as exc:
+        log.warning("Could not save SDE seed: %s", exc)
 
 
 def get_t2_manufacturable_type_ids() -> list:

@@ -1,0 +1,42 @@
+name: Nightly Market Refresh
+
+on:
+  schedule:
+    - cron: '0 0 * * *'   # midnight UTC every day
+  workflow_dispatch:        # allow manual trigger from the Actions tab
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Wake Render app and wait for ready
+        env:
+          APP_URL: ${{ secrets.RENDER_APP_URL }}
+        run: |
+          echo "Waking app at $APP_URL …"
+          curl -sf "$APP_URL/" -o /dev/null || true   # kick the home page to start init
+
+          echo "Waiting for /api/status to report ready…"
+          for i in $(seq 1 60); do
+            STATUS=$(curl -sf "$APP_URL/api/status" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('status',''))" 2>/dev/null || echo "error")
+            echo "  attempt $i: status=$STATUS"
+            if [ "$STATUS" = "ready" ]; then
+              echo "App is ready."
+              break
+            fi
+            if [ $i -eq 60 ]; then
+              echo "Timed out waiting for app to become ready."
+              exit 1
+            fi
+            sleep 5
+          done
+
+      - name: Refresh market prices and history
+        env:
+          APP_URL: ${{ secrets.RENDER_APP_URL }}
+        run: |
+          echo "Triggering market refresh…"
+          curl -sf -X POST "$APP_URL/api/refresh" -H "Content-Type: application/json"
+          echo "Refresh triggered successfully."
